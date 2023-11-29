@@ -2,12 +2,12 @@ import json
 from typing import Any, Dict, List
 
 from django.db import models
-from fractal import MatrixClient
 from fractal_database.models import (
     Database,
     ReplicatedModelRepresentation,
     ReplicationTarget,
 )
+from fractal_database.replication.tasks import replicate_fixture
 
 
 class MatrixReplicationTarget(ReplicationTarget):
@@ -24,12 +24,18 @@ class MatrixReplicationTarget(ReplicationTarget):
         database = await Database.objects.aget(uuid=self.database_id)  # type: ignore
         representation = await ReplicatedModelRepresentation.objects.aget(object_id=database.uuid)
         room_id = representation.metadata["room_id"]
-        async with MatrixClient(self.homeserver, self.access_token) as client:
-            await client.send_message(room_id, replication_event, msgtype=self.event_type)
+
+        t = (
+            await replicate_fixture.kicker()
+            .with_labels(room_id=room_id)
+            .kiq(replication_event, room_id=room_id, event_type=self.event_type)
+        )
+        print(f"Kicked task: {t}")
+
+        # async with MatrixClient(self.homeserver, self.access_token) as client:
+        #     await client.send_message(room_id, replication_event, msgtype=self.event_type)
 
     async def replicate(self) -> None:
-        # await log.arefresh_from_db()
-
         transaction_logs_querysets = await self.get_repl_logs_by_txn()
 
         # collect all of the payloads from the replciation logs into a single array

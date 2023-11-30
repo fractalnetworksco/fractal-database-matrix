@@ -1,6 +1,7 @@
 import json
 from typing import Any, Dict, List
 
+from django.conf import settings
 from django.db import models
 from fractal_database.models import (
     Database,
@@ -17,6 +18,11 @@ class MatrixReplicationTarget(ReplicationTarget):
     homeserver = models.CharField(max_length=255, default=None)
 
     async def push_replication_log(self, fixture: List[Dict[str, Any]]) -> None:
+        """
+        Pushes a replication log to the Matrix homeserver. Uses taskiq
+        to "kick" a replication task that all devices in the object's
+        configured room will load.
+        """
         # we have to serialize the fixture to json because Matrix has a non-standard
         # JSON encoding that doesn't allow floats
         replication_event = json.dumps(fixture)
@@ -24,16 +30,11 @@ class MatrixReplicationTarget(ReplicationTarget):
         database = await Database.objects.aget(uuid=self.database_id)  # type: ignore
         representation = await ReplicatedModelRepresentation.objects.aget(object_id=database.uuid)
         room_id = representation.metadata["room_id"]
+        project_dir = settings.BASE_DIR
 
-        t = (
-            await replicate_fixture.kicker()
-            .with_labels(room_id=room_id)
-            .kiq(replication_event, room_id=room_id, event_type=self.event_type)
+        await replicate_fixture.kicker().with_labels(room_id=room_id).kiq(
+            replication_event, str(project_dir)
         )
-        print(f"Kicked task: {t}")
-
-        # async with MatrixClient(self.homeserver, self.access_token) as client:
-        #     await client.send_message(room_id, replication_event, msgtype=self.event_type)
 
     async def replicate(self) -> None:
         transaction_logs_querysets = await self.get_repl_logs_by_txn()

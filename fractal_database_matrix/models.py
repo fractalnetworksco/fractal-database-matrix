@@ -30,11 +30,8 @@ class MatrixReplicationTarget(ReplicationTarget):
         database = await Database.objects.aget(uuid=self.database_id)  # type: ignore
         representation = await ReplicatedModelRepresentation.objects.aget(object_id=database.uuid)
         room_id = representation.metadata["room_id"]
-        project_dir = settings.BASE_DIR
 
-        await replicate_fixture.kicker().with_labels(room_id=room_id).kiq(
-            replication_event, str(project_dir)
-        )
+        await replicate_fixture.kicker().with_labels(room_id=room_id).kiq(replication_event)
 
     async def replicate(self) -> None:
         transaction_logs_querysets = await self.get_repl_logs_by_txn()

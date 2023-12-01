@@ -10,6 +10,7 @@ python = "^3.10"
 django = "^4.2.4"
 matrix-nio = "^0.22.1"
 fractal-matrix = {git = "https://github.com/fractalnetworksco/fractal-matrix-client"}
+taskiq-matrix = {git = "https://github.com/fractalnetworksco/taskiq-matrix.git"}
 
 [build-system]
 requires = ["poetry-core"]

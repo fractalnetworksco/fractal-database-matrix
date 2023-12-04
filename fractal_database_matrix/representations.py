@@ -2,7 +2,7 @@ import os
 from typing import TYPE_CHECKING, Set
 
 from asgiref.sync import sync_to_async
-from fractal import MatrixClient
+from fractal.matrix import MatrixClient
 from fractal_database.representations import Representation
 from nio import RoomCreateError
 

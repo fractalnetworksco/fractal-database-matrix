@@ -3,7 +3,7 @@ import os
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Dict, Iterable
 
-from fractal import MatrixClient
+from fractal.matrix import MatrixClient
 from nio import AsyncClient
 
 if TYPE_CHECKING:

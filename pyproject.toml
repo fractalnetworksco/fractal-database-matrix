@@ -7,7 +7,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-django = "^4.2.4"
+django = "^5.0.0"
 matrix-nio = "^0.22.1"
 fractal-matrix-client = "^0.1.0"
 taskiq-matrix = "^0.1.0"

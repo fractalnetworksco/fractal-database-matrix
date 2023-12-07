@@ -27,8 +27,9 @@ class MatrixReplicationTarget(ReplicationTarget):
         # JSON encoding that doesn't allow floats
         replication_event = json.dumps(fixture)
         print(f"Pushing fixture(s): {replication_event}")
-        database = await Database.objects.aget(uuid=self.database_id)  # type: ignore
-        representation = await ReplicatedModelRepresentation.objects.aget(object_id=database.uuid)
+        representation = await ReplicatedModelRepresentation.objects.aget(
+            object_id=self.database_id  # type: ignore
+        )
         room_id = representation.metadata["room_id"]
 
         await replicate_fixture.kicker().with_labels(room_id=room_id).kiq(replication_event)

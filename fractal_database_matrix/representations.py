@@ -1,5 +1,6 @@
 import os
 from typing import TYPE_CHECKING, Set
+from uuid import UUID
 
 from asgiref.sync import sync_to_async
 from fractal.matrix import MatrixClient
@@ -36,12 +37,16 @@ class MatrixRepresentation(Representation):
     @staticmethod
     async def create_room(
         instance: "ReplicatedModel",
-        target: "MatrixReplicationTarget",
+        target_id: UUID,
         name: str,
         uuid: str,
         space: bool = False,
     ) -> "ReplicatedModelRepresentation":
         from fractal_database.models import ReplicatedModelRepresentation
+        from fractal_database_matrix.models import MatrixReplicationTarget
+
+        # fetch the non-base class version of the target so it will contain the Matrix specific properties
+        target = await MatrixReplicationTarget.objects.aget(uuid=target_id)
 
         async with MatrixClient(target.homeserver, target.access_token) as client:
             res = await client.room_create(
@@ -63,9 +68,7 @@ class MatrixRepresentation(Representation):
 
 class MatrixRoom(MatrixRepresentation):
     @classmethod
-    async def create_representation(
-        cls, repr_log: "RepresentationLog", target: "MatrixReplicationTarget"
-    ):
+    async def create_representation(cls, repr_log: "RepresentationLog", target_id: UUID):
         """
         Creates a Matrix room for the ReplicatedModel "instance" that inherits from this class
         """
@@ -79,7 +82,7 @@ class MatrixRoom(MatrixRepresentation):
 
         repr = await MatrixRepresentation.create_room(
             instance=instance,
-            target=target,
+            target_id=target_id,
             name=name,
             uuid=uuid,
             space=False,
@@ -90,9 +93,7 @@ class MatrixRoom(MatrixRepresentation):
 
 class MatrixSpace(MatrixRepresentation):
     @classmethod
-    async def create_representation(
-        cls, repr_log: "RepresentationLog", target: "MatrixReplicationTarget"
-    ):
+    async def create_representation(cls, repr_log: "RepresentationLog", target_id: UUID):
         """
         Creates a Matrix space for the ReplicatedModel "instance" that inherits from this class
         """
@@ -106,7 +107,7 @@ class MatrixSpace(MatrixRepresentation):
 
         repr = await MatrixRepresentation.create_room(
             instance=instance,
-            target=target,
+            target_id=target_id,
             name=name,
             uuid=uuid,
             space=True,

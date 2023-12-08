@@ -3,14 +3,8 @@ import logging
 from typing import Any, Dict, List
 
 from asgiref.sync import sync_to_async
-from django.conf import settings
-from django.db import models, transaction
-from fractal_database.models import (
-    Database,
-    ReplicatedModelRepresentation,
-    ReplicationTarget,
-    RepresentationLog,
-)
+from django.db import models
+from fractal_database.models import ReplicationTarget, RepresentationLog, RootDatabase
 from fractal_database.replication.tasks import replicate_fixture
 
 logger = logging.getLogger(__name__)
@@ -28,31 +22,31 @@ class MatrixReplicationTarget(ReplicationTarget):
         to "kick" a replication task that all devices in the object's
         configured room will load.
         """
-        # keep track if we need to call replicate again so that
-        # we can replicate to a replication target immediately after it is created
-        redo = False
         # we have to serialize the fixture to json because Matrix has a non-standard
         # JSON encoding that doesn't allow floats
         replication_event = json.dumps(fixture)
         print(f"Pushing fixture(s): {replication_event}")
-        try:
-            representation = await ReplicatedModelRepresentation.objects.aget(
-                object_id=self.database_id  # type: ignore
-            )
-        except ReplicatedModelRepresentation.DoesNotExist:
-            print(
-                f"Unable to replicate, no representation found for Database {self.database.name}"
-            )
+
+        redo = False
+        if not self.metadata.get("room_id"):
+            database = await self.content_type.model_class().objects.aget(uuid=self.object_id)
+            print(f"Unable to replicate, no representation found for Database {database.name}")
             # trigger a replication cycle since we dont have a representation yet
             # this will create the representation logs we need to enable replication to our first target
-            await sync_to_async(self.database.schedule_replication)(created=True)
-            repr_log = await RepresentationLog.objects.aget()
+            try:
+                database = await RootDatabase.objects.aget(uuid=database.uuid)
+            except RootDatabase.DoesNotExist:
+                pass
+                # database = self.database
+
+            await sync_to_async(database.schedule_replication)(created=True)
+            repr_log = await RepresentationLog.objects.aget(target_id=self.uuid)
             await repr_log.apply()
-            representation = await ReplicatedModelRepresentation.objects.aget(
-                object_id=self.database_id  # type: ignore
-            )
+            await self.arefresh_from_db()
+            # await sync_to_async(self.schedule_replication)(created=True)
             redo = True
-        room_id = representation.metadata["room_id"]
+
+        room_id = self.metadata["room_id"]
         await replicate_fixture.kicker().with_labels(room_id=room_id).kiq(replication_event)
         if redo:
             await self.replicate()
@@ -68,7 +62,7 @@ class MatrixReplicationTarget(ReplicationTarget):
         # collect all of the payloads from the replication logs into a single array
         for queryset in transaction_logs_querysets:
             fixture = []
-            async for log in queryset.select_related("target"):
+            async for log in queryset:
                 print("Querying for representation logs...")
                 async for repr_log in log.repr_logs.filter(deleted=False).order_by(
                     "date_created"

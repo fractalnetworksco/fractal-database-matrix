@@ -1,19 +1,12 @@
-import os
 from typing import TYPE_CHECKING, Set
 from uuid import UUID
 
-from asgiref.sync import sync_to_async
 from fractal.matrix import MatrixClient
 from fractal_database.representations import Representation
 from nio import RoomCreateError
 
 if TYPE_CHECKING:
-    from fractal_database.models import (
-        ReplicatedModel,
-        ReplicatedModelRepresentation,
-        RepresentationLog,
-    )
-    from fractal_database_matrix.models import MatrixReplicationTarget
+    from fractal_database.models import RepresentationLog
 
 
 class MatrixRepresentation(Representation):
@@ -36,13 +29,10 @@ class MatrixRepresentation(Representation):
 
     @staticmethod
     async def create_room(
-        instance: "ReplicatedModel",
         target_id: UUID,
         name: str,
-        uuid: str,
         space: bool = False,
-    ) -> "ReplicatedModelRepresentation":
-        from fractal_database.models import ReplicatedModelRepresentation
+    ) -> None:
         from fractal_database_matrix.models import MatrixReplicationTarget
 
         # fetch the non-base class version of the target so it will contain the Matrix specific properties
@@ -58,12 +48,8 @@ class MatrixRepresentation(Representation):
             room_id = res.room_id
             print(f"Successfully created representation of {name} in Matrix: {room_id}")
 
-        return await ReplicatedModelRepresentation.objects.acreate(
-            instance=instance,
-            object_id=uuid,
-            metadata={"room_id": room_id},
-            target=target,
-        )
+        target.metadata["room_id"] = room_id
+        return await target.asave()
 
 
 class MatrixRoom(MatrixRepresentation):
@@ -74,17 +60,12 @@ class MatrixRoom(MatrixRepresentation):
         """
         try:
             name = repr_log.metadata["name"]
-            uuid = repr_log.metadata["uuid"]
         except KeyError:
             raise Exception("name and uuid must be specified in metadata")
 
-        instance = await sync_to_async(lambda: repr_log.instance)()
-
-        repr = await MatrixRepresentation.create_room(
-            instance=instance,
+        await MatrixRepresentation.create_room(
             target_id=target_id,
             name=name,
-            uuid=uuid,
             space=False,
         )
 
@@ -99,17 +80,12 @@ class MatrixSpace(MatrixRepresentation):
         """
         try:
             name = repr_log.metadata["name"]
-            uuid = repr_log.metadata["uuid"]
         except KeyError:
             raise Exception("name and uuid must be specified in metadata")
 
-        instance = await sync_to_async(lambda: repr_log.instance)()
-
-        repr = await MatrixRepresentation.create_room(
-            instance=instance,
+        await MatrixRepresentation.create_room(
             target_id=target_id,
             name=name,
-            uuid=uuid,
             space=True,
         )
 

@@ -1,11 +1,14 @@
 import json
 import logging
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from asgiref.sync import sync_to_async
 from django.db import models
 from fractal_database.models import ReplicationTarget, RepresentationLog, RootDatabase
 from fractal_database.replication.tasks import replicate_fixture
+
+if TYPE_CHECKING:
+    from fractal_database.models import Database
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +28,10 @@ class MatrixReplicationTarget(ReplicationTarget):
         # we have to serialize the fixture to json because Matrix has a non-standard
         # JSON encoding that doesn't allow floats
         replication_event = json.dumps(fixture)
-        print(f"Pushing fixture(s): {replication_event}")
 
         redo = False
         if not self.metadata.get("room_id"):
-            database = await self.content_type.model_class().objects.aget(uuid=self.object_id)
+            database: Database = await self.content_type.model_class().objects.aget(uuid=self.object_id)  # type: ignore
             print(f"Unable to replicate, no representation found for Database {database.name}")
             # trigger a replication cycle since we dont have a representation yet
             # this will create the representation logs we need to enable replication to our first target
@@ -47,6 +49,7 @@ class MatrixReplicationTarget(ReplicationTarget):
             redo = True
 
         room_id = self.metadata["room_id"]
+        print(f"Pushing fixture(s): {replication_event} to {room_id}")
         await replicate_fixture.kicker().with_labels(room_id=room_id).kiq(replication_event)
         if redo:
             await self.replicate()

@@ -42,9 +42,9 @@ class MatrixReplicationTarget(ReplicationTarget):
                 # database = self.database
 
             await sync_to_async(database.schedule_replication)(created=True)
-            repr_log = await RepresentationLog.objects.select_related("content_type").aget(
-                target_id=self.uuid
-            )
+            repr_log = await RepresentationLog.objects.select_related(
+                "content_type", "target_type"
+            ).aget(target_id=self.uuid)
             await repr_log.apply()
             await self.arefresh_from_db()
             # await sync_to_async(self.schedule_replication)(created=True)
@@ -69,11 +69,12 @@ class MatrixReplicationTarget(ReplicationTarget):
             fixture = []
             async for log in queryset:
                 print("Querying for representation logs...")
-                async for repr_log in log.repr_logs.select_related("content_type").filter(
-                    deleted=False
-                ).order_by("date_created"):
+                async for repr_log in log.repr_logs.select_related(
+                    "content_type", "target_type"
+                ).filter(deleted=False).order_by("date_created"):
                     try:
                         await repr_log.apply()
+                        return await self.replicate()
                     except Exception as e:
                         logger.error(f"Error applying representation log: {e}")
                         continue

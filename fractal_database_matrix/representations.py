@@ -32,7 +32,7 @@ class MatrixRepresentation(Representation):
         target_id: UUID,
         name: str,
         space: bool = False,
-    ) -> None:
+    ) -> str:
         from fractal_database_matrix.models import MatrixReplicationTarget
 
         # fetch the non-base class version of the target so it will contain the Matrix specific properties
@@ -48,13 +48,14 @@ class MatrixRepresentation(Representation):
             room_id = res.room_id
             print(f"Successfully created representation of {name} in Matrix: {room_id}")
 
-        target.metadata["room_id"] = room_id
-        return await target.asave()
+        return res.room_id
 
 
 class MatrixRoom(MatrixRepresentation):
     @classmethod
-    async def create_representation(cls, repr_log: "RepresentationLog", target_id: UUID):
+    async def create_representation(
+        cls, repr_log: "RepresentationLog", target_id: UUID
+    ) -> dict[str, str]:
         """
         Creates a Matrix room for the ReplicatedModel "instance" that inherits from this class
         """
@@ -63,18 +64,21 @@ class MatrixRoom(MatrixRepresentation):
         except KeyError:
             raise Exception("name and uuid must be specified in metadata")
 
-        await MatrixRepresentation.create_room(
+        room_id = await MatrixRepresentation.create_room(
             target_id=target_id,
             name=name,
             space=False,
         )
 
         print("Created Matrix room for", name)
+        return {"room_id": room_id}
 
 
 class MatrixSpace(MatrixRepresentation):
     @classmethod
-    async def create_representation(cls, repr_log: "RepresentationLog", target_id: UUID):
+    async def create_representation(
+        cls, repr_log: "RepresentationLog", target_id: UUID
+    ) -> dict[str, str]:
         """
         Creates a Matrix space for the ReplicatedModel "instance" that inherits from this class
         """
@@ -83,10 +87,11 @@ class MatrixSpace(MatrixRepresentation):
         except KeyError:
             raise Exception("name and uuid must be specified in metadata")
 
-        await MatrixRepresentation.create_room(
+        room_id = await MatrixRepresentation.create_room(
             target_id=target_id,
             name=name,
             space=True,
         )
 
         print("Created Matrix space for", name)
+        return {"room_id": room_id}

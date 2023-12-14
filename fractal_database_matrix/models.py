@@ -6,7 +6,7 @@ from asgiref.sync import sync_to_async
 from django.db import models
 from fractal_database.models import ReplicationTarget, RepresentationLog, RootDatabase
 from fractal_database.replication.tasks import replicate_fixture
-from fractal_database_matrix.representations import MatrixSpace
+from fractal_database_matrix.representations import MatrixReplicationTargetSpace
 
 if TYPE_CHECKING:
     from fractal_database.models import Database
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class MatrixReplicationTarget(ReplicationTarget, MatrixSpace):
+class MatrixReplicationTarget(ReplicationTarget, MatrixReplicationTargetSpace):
     event_type = "f.database.event"
 
     access_token = models.CharField(max_length=255, default=None)

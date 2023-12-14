@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Set
+from typing import TYPE_CHECKING, Dict
 from uuid import UUID
 
 from fractal.matrix import MatrixClient
@@ -19,8 +19,8 @@ class MatrixRepresentation(Representation):
     ]
 
     @classmethod
-    def get_repr_metadata_properties(cls) -> Set[str]:
-        return {"name", "uuid"}
+    def get_repr_metadata_properties(cls) -> Dict[str, str]:
+        return {"name": "name", "uuid": "uuid"}
 
     @classmethod
     @property
@@ -95,3 +95,9 @@ class MatrixSpace(MatrixRepresentation):
 
         print("Created Matrix space for", name)
         return {"room_id": room_id}
+
+
+class MatrixReplicationTargetSpace(MatrixSpace):
+    @classmethod
+    def get_repr_metadata_properties(cls) -> Dict[str, str]:
+        return {"name": "database.name", "uuid": "uuid"}

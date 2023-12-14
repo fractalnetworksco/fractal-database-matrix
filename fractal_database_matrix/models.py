@@ -6,6 +6,7 @@ from asgiref.sync import sync_to_async
 from django.db import models
 from fractal_database.models import ReplicationTarget, RepresentationLog, RootDatabase
 from fractal_database.replication.tasks import replicate_fixture
+from fractal_database_matrix.representations import MatrixSpace
 
 if TYPE_CHECKING:
     from fractal_database.models import Database
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class MatrixReplicationTarget(ReplicationTarget):
+class MatrixReplicationTarget(ReplicationTarget, MatrixSpace):
     event_type = "f.database.event"
 
     access_token = models.CharField(max_length=255, default=None)
@@ -31,22 +32,8 @@ class MatrixReplicationTarget(ReplicationTarget):
 
         redo = False
         if not self.metadata.get("room_id"):
-            database: Database = await self.content_type.model_class().objects.aget(uuid=self.object_id)  # type: ignore
-            print(f"Unable to replicate, no representation found for Database {database.name}")
-            # trigger a replication cycle since we dont have a representation yet
-            # this will create the representation logs we need to enable replication to our first target
-            try:
-                database = await RootDatabase.objects.aget(uuid=database.uuid)
-            except RootDatabase.DoesNotExist:
-                pass
-                # database = self.database
-
-            await sync_to_async(database.schedule_replication)(created=True)
-            repr_log = await RepresentationLog.objects.aget(target_id=self.uuid)
-            await repr_log.apply()
-            await self.arefresh_from_db()
-            # await sync_to_async(self.schedule_replication)(created=True)
-            redo = True
+            logger.warning(f"Unable to replicate, no room_id found for {self.name}")
+            return
 
         room_id = self.metadata["room_id"]
         print(f"Pushing fixture(s): {replication_event} to {room_id}")
@@ -65,15 +52,29 @@ class MatrixReplicationTarget(ReplicationTarget):
         # collect all of the payloads from the replication logs into a single array
         for queryset in transaction_logs_querysets:
             fixture = []
+            logger.debug("Querying for representation logs...")
             async for log in queryset:
-                print("Querying for representation logs...")
-                async for repr_log in log.repr_logs.filter(deleted=False).order_by(
-                    "date_created"
-                ):
-                    await repr_log.apply(self)
+                async for repr_log in log.repr_logs.select_related(
+                    "content_type", "target_type"
+                ).filter(deleted=False).order_by("date_created"):
+                    try:
+                        await repr_log.apply()
+                        # after applying a representation for this target,
+                        # we need to refresh ourself to get any latest metadata
+                        if repr_log.content_type.model_class() == self.__class__:
+                            logger.info("Refreshing {self} after applying representation")
+                            await self.arefresh_from_db()
+                        # call replicate again since apply will create new
+                        # replication logs
+                        return await self.replicate()
+                    except Exception as e:
+                        logger.error(f"Error applying representation log: {e}")
+                        continue
                 fixture.append(log.payload[0])
 
-            await self.push_replication_log(fixture)
-
-            # bulk update all of the logs in the queryset to deleted
-            await queryset.aupdate(deleted=True)
+            try:
+                await self.push_replication_log(fixture)
+                # bulk update all of the logs in the queryset to deleted
+                await queryset.aupdate(deleted=True)
+            except Exception as e:
+                logger.error(f"Error pushing replication log: {e}")

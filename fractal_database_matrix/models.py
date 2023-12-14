@@ -1,20 +1,16 @@
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import Any, Dict, List
 
-from asgiref.sync import sync_to_async
 from django.db import models
-from fractal_database.models import ReplicationTarget, RepresentationLog, RootDatabase
+from fractal_database.models import ReplicationTarget
 from fractal_database.replication.tasks import replicate_fixture
-from fractal_database_matrix.representations import MatrixReplicationTargetSpace
-
-if TYPE_CHECKING:
-    from fractal_database.models import Database
+from fractal_database_matrix.representations import AppSpace, RootSpace
 
 logger = logging.getLogger(__name__)
 
 
-class MatrixReplicationTarget(ReplicationTarget, MatrixReplicationTargetSpace):
+class MatrixRootReplicationTarget(ReplicationTarget, RootSpace):
     event_type = "f.database.event"
 
     access_token = models.CharField(max_length=255, default=None)
@@ -75,3 +71,7 @@ class MatrixReplicationTarget(ReplicationTarget, MatrixReplicationTargetSpace):
                 await queryset.aupdate(deleted=True)
             except Exception as e:
                 logger.error(f"Error pushing replication log: {e}")
+
+
+class MatrixAppReplicationTarget(ReplicationTarget, AppSpace):
+    pass

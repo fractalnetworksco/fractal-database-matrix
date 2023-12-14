@@ -33,10 +33,10 @@ class MatrixRepresentation(Representation):
         name: str,
         space: bool = False,
     ) -> str:
-        from fractal_database_matrix.models import MatrixReplicationTarget
+        from fractal_database_matrix.models import MatrixRootReplicationTarget
 
         # fetch the non-base class version of the target so it will contain the Matrix specific properties
-        target = await MatrixReplicationTarget.objects.aget(uuid=target_id)
+        target = await MatrixRootReplicationTarget.objects.aget(uuid=target_id)
 
         async with MatrixClient(target.homeserver, target.access_token) as client:
             res = await client.room_create(
@@ -97,7 +97,27 @@ class MatrixSpace(MatrixRepresentation):
         return {"room_id": room_id}
 
 
-class MatrixReplicationTargetSpace(MatrixSpace):
+class RootSpace(MatrixSpace):
+    initial_state = [
+        {
+            "type": "f.database.root",
+            "content": {},
+        }
+    ]
+
+    @classmethod
+    def get_repr_metadata_properties(cls) -> Dict[str, str]:
+        return {"name": "database.name", "uuid": "uuid"}
+
+
+class AppSpace(MatrixSpace):
+    initial_state = [
+        {
+            "type": "f.database.app",
+            "content": {},
+        }
+    ]
+
     @classmethod
     def get_repr_metadata_properties(cls) -> Dict[str, str]:
         return {"name": "database.name", "uuid": "uuid"}

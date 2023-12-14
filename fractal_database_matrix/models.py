@@ -30,7 +30,6 @@ class MatrixReplicationTarget(ReplicationTarget, MatrixReplicationTargetSpace):
         # JSON encoding that doesn't allow floats
         replication_event = json.dumps(fixture)
 
-        redo = False
         if not self.metadata.get("room_id"):
             logger.warning(f"Unable to replicate, no room_id found for {self.name}")
             return
@@ -38,8 +37,6 @@ class MatrixReplicationTarget(ReplicationTarget, MatrixReplicationTargetSpace):
         room_id = self.metadata["room_id"]
         print(f"Pushing fixture(s): {replication_event} to {room_id}")
         await replicate_fixture.kicker().with_labels(room_id=room_id).kiq(replication_event)
-        if redo:
-            await self.replicate()
 
     async def replicate(self) -> None:
         """

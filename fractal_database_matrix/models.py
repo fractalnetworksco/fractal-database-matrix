@@ -1,11 +1,13 @@
 import json
 import logging
+import os
 from typing import Any, Dict, List
 
 from django.db import models
 from fractal_database.models import ReplicationTarget
 from fractal_database.replication.tasks import replicate_fixture
 from fractal_database_matrix.representations import AppSpace, RootSpace
+from taskiq.exceptions import SendTaskError
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,12 @@ class MatrixRootReplicationTarget(ReplicationTarget, RootSpace):
 
         room_id = self.metadata["room_id"]
         print(f"Pushing fixture(s): {replication_event} to {room_id}")
-        await replicate_fixture.kicker().with_labels(room_id=room_id).kiq(replication_event)
+        try:
+            os.environ["MATRIX_ACCESS_TOKEN"] = self.access_token
+            os.environ["MATRIX_HOMESERVER_URL"] = self.homeserver
+            await replicate_fixture.kicker().with_labels(room_id=room_id).kiq(replication_event)
+        except SendTaskError as e:
+            raise Exception(e.__cause__)
 
     async def replicate(self) -> None:
         """

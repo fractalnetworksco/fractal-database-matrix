@@ -25,10 +25,10 @@ class MatrixRepresentation(Representation):
     @classmethod
     @property
     def repr_method(cls):
-        return f"{cls.module}.{cls.__name__}:create_representation"
+        return f"{cls.module}.{cls.__name__}"
 
-    @staticmethod
     async def create_room(
+        self,
         target_id: UUID,
         name: str,
         space: bool = False,
@@ -40,7 +40,7 @@ class MatrixRepresentation(Representation):
 
         async with MatrixClient(target.homeserver, target.access_token) as client:
             res = await client.room_create(
-                name=name, space=space, initial_state=MatrixRepresentation.initial_state
+                name=name, space=space, initial_state=self.initial_state
             )
             if isinstance(res, RoomCreateError):
                 raise Exception(res.message)
@@ -52,9 +52,8 @@ class MatrixRepresentation(Representation):
 
 
 class MatrixRoom(MatrixRepresentation):
-    @classmethod
     async def create_representation(
-        cls, repr_log: "RepresentationLog", target_id: UUID
+        self, repr_log: "RepresentationLog", target_id: UUID
     ) -> dict[str, str]:
         """
         Creates a Matrix room for the ReplicatedModel "instance" that inherits from this class
@@ -64,7 +63,7 @@ class MatrixRoom(MatrixRepresentation):
         except KeyError:
             raise Exception("name and uuid must be specified in metadata")
 
-        room_id = await MatrixRepresentation.create_room(
+        room_id = await self.create_room(
             target_id=target_id,
             name=name,
             space=False,
@@ -75,9 +74,8 @@ class MatrixRoom(MatrixRepresentation):
 
 
 class MatrixSpace(MatrixRepresentation):
-    @classmethod
     async def create_representation(
-        cls, repr_log: "RepresentationLog", target_id: UUID
+        self, repr_log: "RepresentationLog", target_id: UUID
     ) -> dict[str, str]:
         """
         Creates a Matrix space for the ReplicatedModel "instance" that inherits from this class
@@ -87,7 +85,7 @@ class MatrixSpace(MatrixRepresentation):
         except KeyError:
             raise Exception("name and uuid must be specified in metadata")
 
-        room_id = await MatrixRepresentation.create_room(
+        room_id = await self.create_room(
             target_id=target_id,
             name=name,
             space=True,

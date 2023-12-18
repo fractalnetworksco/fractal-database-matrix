@@ -11,6 +11,8 @@ from fractal_database_matrix.representations import (
     MatrixSubSpace,
 )
 from taskiq import SendTaskError
+from taskiq.kicker import AsyncKicker
+from taskiq_matrix.matrix_broker import MatrixBroker
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +38,15 @@ async def push_replication_log(target, fixture: List[Dict[str, Any]]) -> None:
 
     room_id = target.metadata["room_id"]
     print(f"Pushing fixture(s): {replication_event} to {room_id}")
+    broker = MatrixBroker().with_matrix_config(
+        room_id=room_id,
+        homeserver_url=target.homeserver,
+        access_token=target.access_token,
+    )
     try:
-        os.environ["MATRIX_ACCESS_TOKEN"] = target.access_token
-        os.environ["MATRIX_HOMESERVER_URL"] = target.homeserver
-        await replicate_fixture.kicker().with_labels(room_id=room_id).kiq(replication_event)
+        await replicate_fixture.kicker().with_broker(broker).with_labels(room_id=room_id).kiq(
+            replication_event
+        )
     except SendTaskError as e:
         raise Exception(e.__cause__)
 

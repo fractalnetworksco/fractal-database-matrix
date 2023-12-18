@@ -136,7 +136,7 @@ class MatrixSubSpace(MatrixSpace):
         """
         from fractal_database.models import RepresentationLog
 
-        logs = super().create_representation_logs(instance, target, metadata_props, MatrixSpace)
+        logs = MatrixSpace.create_representation_logs(instance, target, metadata_props)
 
         metadata = {
             prop_name: get_nested_attr(instance, prop)

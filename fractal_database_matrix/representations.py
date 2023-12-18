@@ -1,12 +1,17 @@
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Any, Coroutine, Dict
 from uuid import UUID
 
 from fractal.matrix import MatrixClient
-from fractal_database.representations import Representation
-from nio import RoomCreateError
+from fractal_database.representations import Representation, get_nested_attr
+from nio import RoomCreateError, RoomPutStateError
 
 if TYPE_CHECKING:
-    from fractal_database.models import RepresentationLog
+    from fractal_database.models import (
+        ReplicatedModel,
+        ReplicationTarget,
+        RepresentationLog,
+    )
+    from fractal_database_matrix.models import MatrixReplicationTarget
 
 
 class MatrixRepresentation(Representation):
@@ -29,14 +34,11 @@ class MatrixRepresentation(Representation):
 
     async def create_room(
         self,
-        target_id: UUID,
+        target: "MatrixReplicationTarget",
         name: str,
         space: bool = False,
     ) -> str:
         from fractal_database_matrix.models import MatrixRootReplicationTarget
-
-        # fetch the non-base class version of the target so it will contain the Matrix specific properties
-        target = await MatrixRootReplicationTarget.objects.aget(uuid=target_id)
 
         async with MatrixClient(target.homeserver, target.access_token) as client:
             res = await client.room_create(
@@ -49,6 +51,25 @@ class MatrixRepresentation(Representation):
             print(f"Successfully created representation of {name} in Matrix: {room_id}")
 
         return res.room_id
+
+    async def add_subspace(
+        self, target: "MatrixReplicationTarget", parent_room_id: str, child_room_id: str
+    ) -> None:
+        # fetch the non-base class version of the target so it will contain the Matrix specific properties
+
+        async with MatrixClient(target.homeserver, target.access_token) as client:
+            res = await client.room_put_state(
+                parent_room_id,
+                "m.space.child",
+                {"via": [target.homeserver]},
+                state_key=child_room_id,
+            )
+            if isinstance(res, RoomPutStateError):
+                raise Exception(res.message)
+
+            print(
+                f"Successfully added child space {child_room_id} to parent space {parent_room_id}"
+            )
 
 
 class MatrixRoom(MatrixRepresentation):
@@ -63,8 +84,9 @@ class MatrixRoom(MatrixRepresentation):
         except KeyError:
             raise Exception("name and uuid must be specified in metadata")
 
+        target = await repr_log.target_type.model_class().objects.aget(uuid=repr_log.target_id)
         room_id = await self.create_room(
-            target_id=target_id,
+            target=target,
             name=name,
             space=False,
         )
@@ -85,8 +107,10 @@ class MatrixSpace(MatrixRepresentation):
         except KeyError:
             raise Exception("name and uuid must be specified in metadata")
 
+        target = await repr_log.target_type.model_class().objects.aget(uuid=repr_log.target_id)
+
         room_id = await self.create_room(
-            target_id=target_id,
+            target=target,
             name=name,
             space=True,
         )
@@ -94,18 +118,57 @@ class MatrixSpace(MatrixRepresentation):
         print("Created Matrix space for", name)
         return {"room_id": room_id}
 
-
-class RootSpace(MatrixSpace):
-    initial_state = [
-        {
-            "type": "f.database.root",
-            "content": {},
-        }
-    ]
-
     @classmethod
     def get_repr_metadata_properties(cls) -> Dict[str, str]:
         return {"name": "database.name", "uuid": "uuid"}
+
+
+class MatrixSubSpace(MatrixSpace):
+    @classmethod
+    def create_representation_logs(
+        cls,
+        instance: "ReplicatedModel",
+        target: "ReplicationTarget",
+        metadata_props: Dict[str, str],
+    ):
+        """
+        Create the representation logs (tasks) for creating a Matrix space
+        """
+        from fractal_database.models import RepresentationLog
+
+        logs = super().create_representation_logs(instance, target, metadata_props, MatrixSpace)
+
+        metadata = {
+            prop_name: get_nested_attr(instance, prop)
+            for prop_name, prop in metadata_props.items()
+        }
+
+        subspace_create = RepresentationLog.objects.create(
+            instance=instance, method=cls.repr_method, target=target, metadata=metadata
+        )
+        logs.append(subspace_create)
+        return logs
+
+    async def create_representation(self, repr_log: "RepresentationLog", target_id: UUID) -> None:
+        """
+        Creates a Matrix space for the ReplicatedModel "instance" that inherits from this class
+        """
+        print(repr_log.metadata)
+        parent_room_id = repr_log.metadata["parent_repr_id"]
+        model_class = repr_log.content_type.model_class()
+        target_model = repr_log.target_type.model_class()
+        instance = await model_class.objects.aget(uuid=repr_log.object_id)
+        target = await target_model.objects.aget(uuid=target_id)
+        child_room_id = instance.metadata["room_id"]
+        await self.add_subspace(target, parent_room_id, child_room_id)
+
+    @classmethod
+    def get_repr_metadata_properties(cls) -> Dict[str, str]:
+        return {
+            "name": "database.name",
+            "uuid": "uuid",
+            "parent_repr_id": "database.parent_repr_id",
+        }
 
 
 class AppSpace(MatrixSpace):

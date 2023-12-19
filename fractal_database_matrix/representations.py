@@ -1,6 +1,8 @@
-from typing import TYPE_CHECKING, Any, Coroutine, Dict
+from copy import deepcopy
+from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
 
+from django.core.serializers import serialize
 from fractal.matrix import MatrixClient
 from fractal_database.representations import Representation, get_nested_attr
 from nio import RoomCreateError, RoomPutStateError
@@ -37,12 +39,13 @@ class MatrixRepresentation(Representation):
         target: "MatrixReplicationTarget",
         name: str,
         space: bool = False,
+        initial_state: Optional[list[dict[str, Any]]] = None,
     ) -> str:
-        from fractal_database_matrix.models import MatrixRootReplicationTarget
-
         async with MatrixClient(target.homeserver, target.access_token) as client:
             res = await client.room_create(
-                name=name, space=space, initial_state=self.initial_state
+                name=name,
+                space=space,
+                initial_state=initial_state if initial_state else self.initial_state,
             )
             if isinstance(res, RoomCreateError):
                 raise Exception(res.message)
@@ -96,6 +99,14 @@ class MatrixRoom(MatrixRepresentation):
 
 
 class MatrixSpace(MatrixRepresentation):
+    initial_state = [
+        {
+            "type": "f.database",
+            "content": {},
+        },
+        {"type": "f.database.target", "content": {}},
+    ]
+
     async def create_representation(
         self, repr_log: "RepresentationLog", target_id: UUID
     ) -> dict[str, str]:
@@ -107,12 +118,21 @@ class MatrixSpace(MatrixRepresentation):
         except KeyError:
             raise Exception("name and uuid must be specified in metadata")
 
-        target = await repr_log.target_type.model_class().objects.aget(uuid=repr_log.target_id)
+        target = (
+            await repr_log.target_type.model_class()
+            .objects.select_related("database")
+            .prefetch_related("database__devices")
+            .aget(uuid=repr_log.target_id)
+        )
 
+        initial_state = deepcopy(self.initial_state)
+        initial_state[0]["content"]["fixture"] = serialize("json", [target.database])
+        initial_state[1]["content"]["fixture"] = serialize("json", [target])
         room_id = await self.create_room(
             target=target,
             name=name,
             space=True,
+            initial_state=initial_state,
         )
 
         print("Created Matrix space for", name)

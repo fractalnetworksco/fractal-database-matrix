@@ -1,61 +1,52 @@
 import json
 import logging
-import os
-from typing import Any, Coroutine, Dict, List
+from typing import Any, Dict, List
 
-from fractal_database.models import ReplicationTarget
+from django.db import models
+from fractal_database.models import BaseModel, ReplicationTarget
 from fractal_database.replication.tasks import replicate_fixture
-from fractal_database_matrix.representations import (
-    AppSpace,
-    MatrixSpace,
-    MatrixSubSpace,
-)
 from taskiq import SendTaskError
-from taskiq.kicker import AsyncKicker
 from taskiq_matrix.matrix_broker import MatrixBroker
 
 logger = logging.getLogger(__name__)
 
-# we wanted to have another abstract model that subclasses ReplicationTarget
-# but we ran into a problem with the Django not allowing us to set set Meta.abstract = True
-# on the subclass which made it difficult to identify concrete ReplicationTarget classes
-# from Database.get_all_replication_targets()
 
+class MatrixReplicationTarget(ReplicationTarget):
+    registration_token = models.CharField(max_length=255, blank=True, null=True)
 
-async def push_replication_log(target, fixture: List[Dict[str, Any]]) -> None:
-    """
-    Pushes a replication log to the replication target as a replicate. Uses taskiq
-    to "kick" a replication task that all devices in the object's
-    configured room will load.
-    """
-    # we have to serialize the fixture to json because Matrix has a non-standard
-    # JSON encoding that doesn't allow floats
-    replication_event = json.dumps(fixture)
+    async def push_replication_log(
+        self: ReplicationTarget, fixture: List[Dict[str, Any]]
+    ) -> None:
+        """
+        Pushes a replication log to the replication self as a replicate. Uses taskiq
+        to "kick" a replication task that all devices in the object's
+        configured room will load.
+        """
+        # we have to serialize the fixture to json because Matrix has a non-standard
+        # JSON encoding that doesn't allow floats
+        replication_event = json.dumps(fixture)
 
-    if not target.metadata.get("room_id"):
-        logger.warning(f"Unable to replicate, no room_id found for {target.name}")
-        return
+        if not self.metadata.get("room_id"):
+            logger.warning(f"Unable to replicate, no room_id found for {self.name}")
+            return
 
-    room_id = target.metadata["room_id"]
-    print(f"Pushing fixture(s): {replication_event} to {room_id}")
-    broker = MatrixBroker().with_matrix_config(
-        room_id=room_id,
-        homeserver_url=target.homeserver,
-        access_token=target.access_token,
-    )
-    try:
-        await replicate_fixture.kicker().with_broker(broker).with_labels(room_id=room_id).kiq(
-            replication_event
+        room_id = self.metadata["room_id"]
+        print(f"Pushing fixture(s): {replication_event} to {room_id}")
+        broker = MatrixBroker().with_matrix_config(
+            room_id=room_id,
+            homeserver_url=self.homeserver,
+            access_token=self.access_token,
         )
-    except SendTaskError as e:
-        raise Exception(e.__cause__)
+        try:
+            await replicate_fixture.kicker().with_broker(broker).with_labels(room_id=room_id).kiq(
+                replication_event
+            )
+        except SendTaskError as e:
+            raise Exception(e.__cause__)
 
 
-class MatrixRootReplicationTarget(ReplicationTarget, MatrixSpace):
-    async def push_replication_log(self, fixture: List[Dict[str, Any]]) -> None:
-        return await push_replication_log(self, fixture)
-
-
-class MatrixNestedReplicationTarget(ReplicationTarget, MatrixSubSpace):
-    async def push_replication_log(self, fixture: List[Dict[str, Any]]) -> None:
-        return await push_replication_log(self, fixture)
+class MatrixCredentials(BaseModel):
+    matrix_id = models.CharField(max_length=255)
+    password = models.CharField(max_length=255, blank=True, null=True)
+    access_token = models.CharField(max_length=255)
+    target = models.ForeignKey(MatrixReplicationTarget, on_delete=models.CASCADE)

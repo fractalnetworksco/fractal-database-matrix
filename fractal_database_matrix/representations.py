@@ -34,6 +34,23 @@ class MatrixRepresentation(Representation):
     def repr_method(cls):
         return f"{cls.module}.{cls.__name__}"
 
+    async def put_state(
+        self,
+        room_id: str,
+        target: "MatrixReplicationTarget",
+        state_type: str,
+        content: dict[str, Any],
+    ) -> None:
+        async with MatrixClient(target.homeserver, target.access_token) as client:
+            res = await client.room_put_state(
+                room_id,
+                state_type,
+                content=content,
+            )
+            if isinstance(res, RoomPutStateError):
+                raise Exception(res.message)
+            return None
+
     async def create_room(
         self,
         target: "MatrixReplicationTarget",
@@ -126,14 +143,20 @@ class MatrixSpace(MatrixRepresentation):
         )
 
         initial_state = deepcopy(self.initial_state)
-        initial_state[0]["content"]["fixture"] = serialize("json", [target.database])
-        initial_state[1]["content"]["fixture"] = serialize("json", [target])
         room_id = await self.create_room(
             target=target,
             name=name,
             space=True,
             initial_state=initial_state,
         )
+
+        target.metadata["room_id"] = room_id
+
+        initial_state[0]["content"]["fixture"] = serialize("json", [target.database])
+        initial_state[1]["content"]["fixture"] = serialize("json", [target])
+
+        await self.put_state(room_id, target, "f.database", initial_state[0]["content"])
+        await self.put_state(room_id, target, "f.database.target", initial_state[1]["content"])
 
         print("Created Matrix space for", name)
         return {"room_id": room_id}

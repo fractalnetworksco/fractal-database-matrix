@@ -27,10 +27,6 @@ class MatrixRepresentation(Representation):
     ]
 
     @classmethod
-    def get_repr_metadata_properties(cls) -> Dict[str, str]:
-        return {"name": "name", "uuid": "uuid"}
-
-    @classmethod
     @property
     def repr_method(cls):
         return f"{cls.module}.{cls.__name__}"
@@ -162,10 +158,6 @@ class MatrixSpace(MatrixRepresentation):
         print("Created Matrix space for", name)
         return {"room_id": room_id}
 
-    @classmethod
-    def get_repr_metadata_properties(cls) -> Dict[str, str]:
-        return {"name": "database.name", "uuid": "uuid"}
-
 
 class MatrixSubSpace(MatrixSpace):
     @classmethod
@@ -179,6 +171,10 @@ class MatrixSubSpace(MatrixSpace):
         Create the representation logs (tasks) for creating a Matrix space
         """
         from fractal_database.models import RepresentationLog
+
+        assert os.environ.get(
+            "MATRIX_PARENT_SPACE_ID"
+        ), "MATRIX_PARENT_SPACE_ID must be set when creating a MatrixSubSpace representation"
 
         # create the representation logs for the subspace
         create_subspace = MatrixSpace.create_representation_logs(instance, target, metadata_props)
@@ -207,15 +203,30 @@ class MatrixSubSpace(MatrixSpace):
         child_room_id = instance.metadata["room_id"]
         await self.add_subspace(target, parent_room_id, child_room_id)
 
+
+class MatrixExistingSubSpace(MatrixSubSpace):
     @classmethod
-    def get_repr_metadata_properties(cls) -> Dict[str, str]:
-        assert os.environ.get(
-            "MATRIX_PARENT_SPACE_ID"
-        ), "MATRIX_PARENT_SPACE_ID must be set when creating a MatrixSubSpace representation"
-        return {
-            "name": "database.name",
-            "uuid": "uuid",
+    def create_representation_logs(
+        cls,
+        instance: "ReplicatedModel",
+        target: "ReplicationTarget",
+        metadata_props: Dict[str, str],
+    ):
+        """
+        Create the representation logs (tasks) for creating a Matrix space
+        """
+        from fractal_database.models import RepresentationLog
+
+        metadata = {
+            prop_name: get_nested_attr(instance, prop)
+            for prop_name, prop in metadata_props.items()
         }
+
+        # create the representation log for adding the subspace to the parent space
+        add_subspace_to_parent = RepresentationLog.objects.create(
+            instance=instance, method=cls.repr_method, target=target, metadata=metadata
+        )
+        return [add_subspace_to_parent]
 
 
 class AppSpace(MatrixSpace):
@@ -225,7 +236,3 @@ class AppSpace(MatrixSpace):
             "content": {},
         }
     ]
-
-    @classmethod
-    def get_repr_metadata_properties(cls) -> Dict[str, str]:
-        return {"name": "database.name", "uuid": "uuid"}

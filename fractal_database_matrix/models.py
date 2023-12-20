@@ -45,8 +45,9 @@ class MatrixReplicationTarget(ReplicationTarget):
         except SendTaskError as e:
             raise Exception(e.__cause__)
 
+    @classmethod
     @property
-    def representation_module(self) -> str:
+    def representation_module(cls) -> str:
         if os.environ.get("MATRIX_REPRESENTATION_MODULE"):
             return os.environ["MATRIX_REPRESENTATION_MODULE"]
         elif os.environ.get("MATRIX_PARENT_SPACE_ID"):

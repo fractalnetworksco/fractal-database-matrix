@@ -199,7 +199,7 @@ class MatrixSubSpace(MatrixSpace):
         """
         Creates a Matrix space for the ReplicatedModel "instance" that inherits from this class
         """
-        parent_room_id = repr_log.metadata["parent_repr_id"]
+        parent_room_id = os.environ["MATRIX_PARENT_SPACE_ID"]
         model_class = repr_log.content_type.model_class()
         target_model = repr_log.target_type.model_class()
         instance = await model_class.objects.aget(uuid=repr_log.object_id)
@@ -215,7 +215,6 @@ class MatrixSubSpace(MatrixSpace):
         return {
             "name": "database.name",
             "uuid": "uuid",
-            "parent_repr_id": os.environ["MATRIX_PARENT_SPACE_ID"],
         }
 
 

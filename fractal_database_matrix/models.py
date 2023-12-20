@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import Any, Dict, List
 
 from django.db import models
@@ -43,6 +44,14 @@ class MatrixReplicationTarget(ReplicationTarget):
             )
         except SendTaskError as e:
             raise Exception(e.__cause__)
+
+    @property
+    def representation_module(self) -> str:
+        if os.environ.get("MATRIX_REPRESENTATION_MODULE"):
+            return os.environ["MATRIX_REPRESENTATION_MODULE"]
+        elif os.environ.get("MATRIX_PARENT_SPACE_ID"):
+            return "fractal_database_matrix.representations.MatrixSubSpace"
+        return "fractal_database_matrix.representations.MatrixSpace"
 
 
 class MatrixCredentials(BaseModel):

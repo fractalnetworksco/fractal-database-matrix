@@ -1,3 +1,4 @@
+import os
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
@@ -179,24 +180,25 @@ class MatrixSubSpace(MatrixSpace):
         """
         from fractal_database.models import RepresentationLog
 
-        logs = MatrixSpace.create_representation_logs(instance, target, metadata_props)
+        # create the representation logs for the subspace
+        create_subspace = MatrixSpace.create_representation_logs(instance, target, metadata_props)
 
         metadata = {
             prop_name: get_nested_attr(instance, prop)
             for prop_name, prop in metadata_props.items()
         }
 
-        subspace_create = RepresentationLog.objects.create(
+        # create the representation log for adding the subspace to the parent space
+        add_subspace_to_parent = RepresentationLog.objects.create(
             instance=instance, method=cls.repr_method, target=target, metadata=metadata
         )
-        logs.append(subspace_create)
-        return logs
+        create_subspace.append(add_subspace_to_parent)
+        return create_subspace
 
     async def create_representation(self, repr_log: "RepresentationLog", target_id: UUID) -> None:
         """
         Creates a Matrix space for the ReplicatedModel "instance" that inherits from this class
         """
-        print(repr_log.metadata)
         parent_room_id = repr_log.metadata["parent_repr_id"]
         model_class = repr_log.content_type.model_class()
         target_model = repr_log.target_type.model_class()
@@ -207,10 +209,13 @@ class MatrixSubSpace(MatrixSpace):
 
     @classmethod
     def get_repr_metadata_properties(cls) -> Dict[str, str]:
+        assert os.environ.get(
+            "MATRIX_PARENT_SPACE_ID"
+        ), "MATRIX_PARENT_SPACE_ID must be set when creating a MatrixSubSpace representation"
         return {
             "name": "database.name",
             "uuid": "uuid",
-            "parent_repr_id": "database.parent_repr_id",
+            "parent_repr_id": os.environ["MATRIX_PARENT_SPACE_ID"],
         }
 
 

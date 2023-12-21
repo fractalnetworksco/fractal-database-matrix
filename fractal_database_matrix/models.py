@@ -45,12 +45,12 @@ class MatrixReplicationTarget(ReplicationTarget):
         except SendTaskError as e:
             raise Exception(e.__cause__)
 
-    @classmethod
-    @property
-    def representation_module(cls) -> str:
-        if os.environ.get("MATRIX_REPRESENTATION_MODULE"):
-            return os.environ["MATRIX_REPRESENTATION_MODULE"]
-        elif os.environ.get("MATRIX_PARENT_SPACE_ID"):
+    def get_representation_module(self) -> str:
+        # if creating a representation for a target that is not the primary target of the current_db
+        # we need to use the sub-space representationi
+        from fractal_database.models import Database
+
+        if Database.current_db().primary_target() != self:
             return "fractal_database_matrix.representations.MatrixSubSpace"
         return "fractal_database_matrix.representations.MatrixSpace"
 

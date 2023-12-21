@@ -172,10 +172,6 @@ class MatrixSubSpace(MatrixSpace):
         """
         from fractal_database.models import RepresentationLog
 
-        assert os.environ.get(
-            "MATRIX_PARENT_SPACE_ID"
-        ), "MATRIX_PARENT_SPACE_ID must be set when creating a MatrixSubSpace representation"
-
         # create the representation logs for the subspace
         create_subspace = MatrixSpace.create_representation_logs(instance, target, metadata_props)
 
@@ -195,11 +191,11 @@ class MatrixSubSpace(MatrixSpace):
         """
         Creates a Matrix space for the ReplicatedModel "instance" that inherits from this class
         """
-        parent_room_id = os.environ["MATRIX_PARENT_SPACE_ID"]
         model_class = repr_log.content_type.model_class()
         target_model = repr_log.target_type.model_class()
         instance = await model_class.objects.aget(uuid=repr_log.object_id)
         target = await target_model.objects.aget(uuid=target_id)
+        parent_room_id = target.metadata["room_id"]
         child_room_id = instance.metadata["room_id"]
         await self.add_subspace(target, parent_room_id, child_room_id)
 

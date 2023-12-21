@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from django.db import models
 from fractal_database.models import BaseModel, ReplicationTarget
@@ -10,6 +10,9 @@ from taskiq import SendTaskError
 from taskiq_matrix.matrix_broker import MatrixBroker
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from fractal_database.models import ReplicatedModel
 
 
 class MatrixReplicationTarget(ReplicationTarget):

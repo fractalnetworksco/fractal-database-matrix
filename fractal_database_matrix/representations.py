@@ -165,7 +165,6 @@ class MatrixSubSpace(MatrixSpace):
         cls,
         instance: "ReplicatedModel",
         target: "ReplicationTarget",
-        metadata_props: Dict[str, str],
     ):
         """
         Create the representation logs (tasks) for creating a Matrix space
@@ -173,16 +172,14 @@ class MatrixSubSpace(MatrixSpace):
         from fractal_database.models import RepresentationLog
 
         # create the representation logs for the subspace
-        create_subspace = MatrixSpace.create_representation_logs(instance, target, metadata_props)
-
-        metadata = {
-            prop_name: get_nested_attr(instance, prop)
-            for prop_name, prop in metadata_props.items()
-        }
+        create_subspace = MatrixSpace.create_representation_logs(instance, target)
 
         # create the representation log for adding the subspace to the parent space
         add_subspace_to_parent = RepresentationLog.objects.create(
-            instance=instance, method=cls.representation_module, target=target, metadata=metadata
+            instance=instance,
+            method=cls.representation_module,
+            target=target,
+            metadata=instance.repr_metadata_props(),
         )
         create_subspace.append(add_subspace_to_parent)
         return create_subspace
@@ -217,7 +214,7 @@ class MatrixExistingSubSpace(MatrixSubSpace):
             instance=instance,
             method=cls.representation_module,
             target=target,
-            metadata=instance.repr_metadata_props,
+            metadata=instance.repr_metadata_props(),
         )
         return [add_subspace_to_parent]
 

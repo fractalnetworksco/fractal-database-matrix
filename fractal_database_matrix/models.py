@@ -4,7 +4,7 @@ import os
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from django.db import models
-from fractal_database.models import BaseModel, ReplicationTarget
+from fractal_database.models import BaseModel, Device, ReplicationTarget
 from fractal_database.replication.tasks import replicate_fixture
 from taskiq import SendTaskError
 from taskiq_matrix.matrix_broker import MatrixBroker
@@ -63,3 +63,4 @@ class MatrixCredentials(BaseModel):
     password = models.CharField(max_length=255, blank=True, null=True)
     access_token = models.CharField(max_length=255)
     target = models.ForeignKey(MatrixReplicationTarget, on_delete=models.CASCADE)
+    device = models.ForeignKey(Device, on_delete=models.CASCADE)

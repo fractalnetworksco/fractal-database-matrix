@@ -15,12 +15,22 @@ if TYPE_CHECKING:
     from fractal_database.models import ReplicatedModel
 
 
+class MatrixCredentials(BaseModel):
+    matrix_id = models.CharField(max_length=255)
+    password = models.CharField(max_length=255, blank=True, null=True)
+    access_token = models.CharField(max_length=255)
+    target = models.OneToOneField(
+        "fractal_database_matrix.MatrixReplicationTarget", on_delete=models.CASCADE
+    )
+    device = models.ForeignKey(Device, on_delete=models.CASCADE)
+
+
 class MatrixReplicationTarget(ReplicationTarget):
     registration_token = models.CharField(max_length=255, blank=True, null=True)
+    access_token = models.CharField(max_length=255, null=True, blank=True)
+    homeserver = models.CharField(max_length=255)
 
-    async def push_replication_log(
-        self: ReplicationTarget, fixture: List[Dict[str, Any]]
-    ) -> None:
+    async def push_replication_log(self, fixture: List[Dict[str, Any]]) -> None:
         """
         Pushes a replication log to the replication self as a replicate. Uses taskiq
         to "kick" a replication task that all devices in the object's
@@ -36,10 +46,11 @@ class MatrixReplicationTarget(ReplicationTarget):
 
         room_id = self.metadata["room_id"]
         print(f"Pushing fixture(s): {replication_event} to {room_id}")
+        creds = await MatrixCredentials.objects.aget(target=self)
         broker = MatrixBroker().with_matrix_config(
             room_id=room_id,
             homeserver_url=self.homeserver,
-            access_token=self.access_token,
+            access_token=creds.access_token,
         )
         try:
             await replicate_fixture.kicker().with_broker(broker).with_labels(room_id=room_id).kiq(
@@ -56,11 +67,3 @@ class MatrixReplicationTarget(ReplicationTarget):
         if Database.current_db().primary_target() != self:
             return "fractal_database_matrix.representations.MatrixSubSpace"
         return "fractal_database_matrix.representations.MatrixSpace"
-
-
-class MatrixCredentials(BaseModel):
-    matrix_id = models.CharField(max_length=255)
-    password = models.CharField(max_length=255, blank=True, null=True)
-    access_token = models.CharField(max_length=255)
-    target = models.ForeignKey(MatrixReplicationTarget, on_delete=models.CASCADE)
-    device = models.ForeignKey(Device, on_delete=models.CASCADE)

@@ -154,8 +154,8 @@ class MatrixSpace(MatrixRepresentation):
 
         target.metadata["room_id"] = room_id
 
-        initial_state[0]["content"]["fixture"] = serialize("json", [target.database])
-        initial_state[1]["content"]["fixture"] = serialize("json", [target])
+        initial_state[0]["content"]["fixture"] = target.database.to_fixture(json=True)
+        initial_state[1]["content"]["fixture"] = target.to_fixture(json=True)
 
         await self.put_state(room_id, target, "f.database", initial_state[0]["content"])
         await self.put_state(room_id, target, "f.database.target", initial_state[1]["content"])

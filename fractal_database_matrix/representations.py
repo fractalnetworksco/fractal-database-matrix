@@ -1,11 +1,10 @@
-import os
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from django.core.serializers import serialize
 from fractal.matrix import MatrixClient
-from fractal_database.representations import Representation, get_nested_attr
+from fractal_database.representations import Representation
 from nio import RoomCreateError, RoomPutStateError
 
 if TYPE_CHECKING:
@@ -38,7 +37,9 @@ class MatrixRepresentation(Representation):
         state_type: str,
         content: dict[str, Any],
     ) -> None:
-        async with MatrixClient(target.homeserver, target.access_token) as client:
+        async with MatrixClient(
+            target.homeserver, target.matrixcredentials.access_token
+        ) as client:
             res = await client.room_put_state(
                 room_id,
                 state_type,
@@ -55,7 +56,9 @@ class MatrixRepresentation(Representation):
         space: bool = False,
         initial_state: Optional[list[dict[str, Any]]] = None,
     ) -> str:
-        async with MatrixClient(target.homeserver, target.access_token) as client:
+        async with MatrixClient(
+            target.homeserver, target.matrixcredentials.access_token
+        ) as client:
             res = await client.room_create(
                 name=name,
                 space=space,
@@ -74,7 +77,9 @@ class MatrixRepresentation(Representation):
     ) -> None:
         # fetch the non-base class version of the target so it will contain the Matrix specific properties
 
-        async with MatrixClient(target.homeserver, target.access_token) as client:
+        async with MatrixClient(
+            target.homeserver, target.matrixcredentials.access_token
+        ) as client:
             res = await client.room_put_state(
                 parent_room_id,
                 "m.space.child",
@@ -132,12 +137,12 @@ class MatrixSpace(MatrixRepresentation):
         except KeyError:
             raise Exception("name and uuid must be specified in metadata")
 
-        target = (
+        target: "MatrixReplicationTarget" = (
             await repr_log.target_type.model_class()
             .objects.select_related("database")
-            .prefetch_related("database__devices")
+            .prefetch_related("database__devices", "matrixcredentials")
             .aget(uuid=repr_log.target_id)
-        )
+        )  # type: ignore
 
         initial_state = deepcopy(self.initial_state)
         room_id = await self.create_room(
@@ -167,7 +172,7 @@ class MatrixSubSpace(MatrixSpace):
         target: "ReplicationTarget",
     ):
         """
-        Create the representation logs (tasks) for creating a Matrix space
+        Create the representation logs (tasks) for creating a Matrix subspace
         """
         from fractal_database.models import RepresentationLog
 

@@ -196,7 +196,9 @@ class MatrixSubSpace(MatrixSpace):
         model_class = repr_log.content_type.model_class()
         target_model = repr_log.target_type.model_class()
         instance = await model_class.objects.aget(uuid=repr_log.object_id)
-        target = await target_model.objects.aget(uuid=target_id)
+        target = await target_model.objects.prefetch_related("matrixcredentials").aget(
+            uuid=target_id
+        )
         parent_room_id = target.metadata["room_id"]
         child_room_id = instance.metadata["room_id"]
         await self.add_subspace(target, parent_room_id, child_room_id)

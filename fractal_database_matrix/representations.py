@@ -5,7 +5,7 @@ from uuid import UUID
 from django.core.serializers import serialize
 from fractal.matrix import MatrixClient
 from fractal_database.representations import Representation
-from nio import RoomCreateError, RoomPutStateError
+from nio import RoomCreateError, RoomPutStateError, RoomVisibility
 
 if TYPE_CHECKING:
     from fractal_database.models import (
@@ -55,7 +55,13 @@ class MatrixRepresentation(Representation):
         name: str,
         space: bool = False,
         initial_state: Optional[list[dict[str, Any]]] = None,
+        public: bool = False,
     ) -> str:
+        if public:
+            visibility = RoomVisibility.public
+        else:
+            visibility = RoomVisibility.private
+
         async with MatrixClient(
             target.homeserver, target.matrixcredentials.access_token
         ) as client:
@@ -63,6 +69,7 @@ class MatrixRepresentation(Representation):
                 name=name,
                 space=space,
                 initial_state=initial_state if initial_state else self.initial_state,
+                visibility=visibility,
             )
             if isinstance(res, RoomCreateError):
                 raise Exception(res.message)
@@ -103,14 +110,22 @@ class MatrixRoom(MatrixRepresentation):
         """
         try:
             name = repr_log.metadata["name"]
+            public = repr_log.metadata.get("public", False)
         except KeyError:
             raise Exception("name and uuid must be specified in metadata")
 
-        target = await repr_log.target_type.model_class().objects.aget(uuid=repr_log.target_id)
+        target: "MatrixReplicationTarget" = (
+            await repr_log.target_type.model_class()
+            .objects.select_related("database")
+            .prefetch_related("database__devices", "matrixcredentials")
+            .aget(uuid=repr_log.target_id)
+        )  # type: ignore
+
         room_id = await self.create_room(
             target=target,
             name=name,
             space=False,
+            public=public,
         )
 
         print("Created Matrix room for", name)
@@ -202,6 +217,33 @@ class MatrixSubSpace(MatrixSpace):
         parent_room_id = target.metadata["room_id"]
         child_room_id = instance.metadata["room_id"]
         await self.add_subspace(target, parent_room_id, child_room_id)
+
+
+class MatrixSubRoom(MatrixSubSpace):
+    @classmethod
+    def create_representation_logs(
+        cls,
+        instance: "ReplicatedModel",
+        target: "ReplicationTarget",
+    ):
+        """
+        Create the representation logs (tasks) for creating a Matrix subroom
+        (A room that is in a space.)
+        """
+        from fractal_database.models import RepresentationLog
+
+        # create the representation logs for the subspace
+        create_subroom = MatrixRoom.create_representation_logs(instance, target)
+
+        # create the representation log for adding the subspace to the parent space
+        add_subroom_to_parent = RepresentationLog.objects.create(
+            instance=instance,
+            method=cls.representation_module,
+            target=target,
+            metadata=instance.repr_metadata_props(),
+        )
+        create_subroom.append(add_subroom_to_parent)
+        return create_subroom
 
 
 class MatrixExistingSubSpace(MatrixSubSpace):

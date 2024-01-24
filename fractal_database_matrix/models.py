@@ -60,7 +60,7 @@ class MatrixReplicationTarget(ReplicationTarget):
 
     def get_representation_module(self) -> str:
         # if creating a representation for a target that is not the primary target of the current_db
-        # we need to use the sub-space representationi
+        # we need to use the sub-space representation
         from fractal_database.models import Database
 
         if Database.current_db().primary_target() != self:

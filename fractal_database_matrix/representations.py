@@ -117,7 +117,7 @@ class MatrixRoom(MatrixRepresentation):
         target: "MatrixReplicationTarget" = (
             await repr_log.target_type.model_class()
             .objects.select_related("database")
-            .prefetch_related("database__devices", "matrixcredentials")
+            .prefetch_related("database__devices", "matrixcredentials", "instances")
             .aget(uuid=repr_log.target_id)
         )  # type: ignore
 
@@ -155,7 +155,7 @@ class MatrixSpace(MatrixRepresentation):
         target: "MatrixReplicationTarget" = (
             await repr_log.target_type.model_class()
             .objects.select_related("database")
-            .prefetch_related("database__devices", "matrixcredentials")
+            .prefetch_related("database__devices", "matrixcredentials", "instances")
             .aget(uuid=repr_log.target_id)
         )  # type: ignore
 
@@ -169,7 +169,8 @@ class MatrixSpace(MatrixRepresentation):
 
         target.metadata["room_id"] = room_id
 
-        initial_state[0]["content"]["fixture"] = target.database.to_fixture(json=True)
+        if target.database:
+            initial_state[0]["content"]["fixture"] = target.database.to_fixture(json=True)
         initial_state[1]["content"]["fixture"] = target.to_fixture(json=True)
 
         await self.put_state(room_id, target, "f.database", initial_state[0]["content"])

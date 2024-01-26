@@ -26,7 +26,6 @@ class MatrixReplicationTarget(ReplicationTarget):
     matrixcredentials: MatrixCredentials
 
     registration_token = models.CharField(max_length=255, blank=True, null=True)
-    access_token = models.CharField(max_length=255, null=True, blank=True)
     homeserver = models.CharField(max_length=255)
 
     async def push_replication_log(self, fixture: List[Dict[str, Any]]) -> None:

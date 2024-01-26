@@ -103,7 +103,7 @@ class MatrixRepresentation(Representation):
 
 class MatrixRoom(MatrixRepresentation):
     async def create_representation(
-        self, repr_log: "RepresentationLog", target_id: UUID
+        self, repr_log: "RepresentationLog", target_id: Any
     ) -> dict[str, str]:
         """
         Creates a Matrix room for the ReplicatedModel "instance" that inherits from this class
@@ -112,13 +112,13 @@ class MatrixRoom(MatrixRepresentation):
             name = repr_log.metadata["name"]
             public = repr_log.metadata.get("public", False)
         except KeyError:
-            raise Exception("name and uuid must be specified in metadata")
+            raise Exception("name must be specified in metadata")
 
         target: "MatrixReplicationTarget" = (
             await repr_log.target_type.model_class()
             .objects.select_related("database")
             .prefetch_related("database__devices", "matrixcredentials", "instances")
-            .aget(uuid=repr_log.target_id)
+            .aget(pk=repr_log.target_id)
         )  # type: ignore
 
         room_id = await self.create_room(
@@ -142,7 +142,7 @@ class MatrixSpace(MatrixRepresentation):
     ]
 
     async def create_representation(
-        self, repr_log: "RepresentationLog", target_id: UUID
+        self, repr_log: "RepresentationLog", target_id: Any
     ) -> dict[str, str]:
         """
         Creates a Matrix space for the ReplicatedModel "instance" that inherits from this class
@@ -150,13 +150,13 @@ class MatrixSpace(MatrixRepresentation):
         try:
             name = repr_log.metadata["name"]
         except KeyError:
-            raise Exception("name and uuid must be specified in metadata")
+            raise Exception("name must be specified in metadata")
 
         target: "MatrixReplicationTarget" = (
             await repr_log.target_type.model_class()
             .objects.select_related("database")
             .prefetch_related("database__devices", "matrixcredentials", "instances")
-            .aget(uuid=repr_log.target_id)
+            .aget(pk=repr_log.target_id)
         )  # type: ignore
 
         initial_state = deepcopy(self.initial_state)
@@ -205,15 +205,15 @@ class MatrixSubSpace(MatrixSpace):
         create_subspace.append(add_subspace_to_parent)
         return create_subspace
 
-    async def create_representation(self, repr_log: "RepresentationLog", target_id: UUID) -> None:
+    async def create_representation(self, repr_log: "RepresentationLog", target_id: Any) -> None:
         """
         Creates a Matrix space for the ReplicatedModel "instance" that inherits from this class
         """
         model_class = repr_log.content_type.model_class()
         target_model = repr_log.target_type.model_class()
-        instance = await model_class.objects.aget(uuid=repr_log.object_id)
+        instance = await model_class.objects.aget(pk=repr_log.object_id)
         target = await target_model.objects.prefetch_related("matrixcredentials").aget(
-            uuid=target_id
+            pk=target_id
         )
         parent_room_id = target.metadata["room_id"]
         child_room_id = instance.metadata["room_id"]

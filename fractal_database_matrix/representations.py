@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 from uuid import UUID
 
 from django.core.serializers import serialize
@@ -37,9 +37,15 @@ class MatrixRepresentation(Representation):
         state_type: str,
         content: dict[str, Any],
     ) -> None:
-        async with MatrixClient(
-            target.homeserver, target.matrixcredentials.access_token
-        ) as client:
+        from fractal.cli.controllers.auth import AuthenticatedController
+
+        creds = AuthenticatedController.get_creds()
+        if not creds:
+            raise Exception("You must be logged in to put state")
+
+        access_token, homeserver_url, _ = creds
+
+        async with MatrixClient(homeserver_url, access_token) as client:
             res = await client.room_put_state(
                 room_id,
                 state_type,
@@ -56,20 +62,31 @@ class MatrixRepresentation(Representation):
         space: bool = False,
         initial_state: Optional[list[dict[str, Any]]] = None,
         public: bool = False,
+        invite: Sequence[str] = (),
     ) -> str:
+        from fractal.cli.controllers.auth import AuthenticatedController
+
         if public:
             visibility = RoomVisibility.public
         else:
             visibility = RoomVisibility.private
 
-        async with MatrixClient(
-            target.homeserver, target.matrixcredentials.access_token
-        ) as client:
+        creds = AuthenticatedController.get_creds()
+        if not creds:
+            raise Exception("You must be logged in to create a room")
+
+        access_token, homeserver_url, _ = creds
+
+        if not any([matrix_id.islower() for matrix_id in invite]):
+            raise Exception("Matrix IDs must be lowercase")
+
+        async with MatrixClient(homeserver_url, access_token) as client:
             res = await client.room_create(
                 name=name,
                 space=space,
                 initial_state=initial_state if initial_state else self.initial_state,
                 visibility=visibility,
+                invite=invite,
             )
             if isinstance(res, RoomCreateError):
                 raise Exception(res.message)
@@ -83,10 +100,15 @@ class MatrixRepresentation(Representation):
         self, target: "MatrixReplicationTarget", parent_room_id: str, child_room_id: str
     ) -> None:
         # fetch the non-base class version of the target so it will contain the Matrix specific properties
+        from fractal.cli.controllers.auth import AuthenticatedController
 
-        async with MatrixClient(
-            target.homeserver, target.matrixcredentials.access_token
-        ) as client:
+        creds = AuthenticatedController.get_creds()
+        if not creds:
+            raise Exception("You must be logged in to add a subspace")
+
+        access_token, homeserver_url, _ = creds
+
+        async with MatrixClient(homeserver_url, access_token) as client:
             res = await client.room_put_state(
                 parent_room_id,
                 "m.space.child",
@@ -117,16 +139,22 @@ class MatrixRoom(MatrixRepresentation):
         target: "MatrixReplicationTarget" = (
             await repr_log.target_type.model_class()
             .objects.select_related("database")
-            .prefetch_related("database__devices", "matrixcredentials", "instances")
+            .prefetch_related("database__devices", "matrixcredentials_set", "instances")
             .aget(pk=repr_log.target_id)
         )  # type: ignore
 
+        matrix_ids_to_invite = [target.matrix_id for target in target.matrixcredentials_set.all()]
         room_id = await self.create_room(
             target=target,
             name=name,
             space=False,
             public=public,
+            invite=matrix_ids_to_invite,
         )
+
+        # accept invites to room
+        for account in target.matrixcredentials_set.all():
+            await account.accept_invite(room_id)
 
         print("Created Matrix room for", name)
         return {"room_id": room_id}
@@ -155,19 +183,37 @@ class MatrixSpace(MatrixRepresentation):
         target: "MatrixReplicationTarget" = (
             await repr_log.target_type.model_class()
             .objects.select_related("database")
-            .prefetch_related("database__devices", "matrixcredentials", "instances")
+            .prefetch_related("database__devices", "matrixcredentials_set", "instances")
             .aget(pk=repr_log.target_id)
         )  # type: ignore
 
+        matrix_ids_to_invite = [target.matrix_id for target in target.matrixcredentials_set.all()]
         initial_state = deepcopy(self.initial_state)
         room_id = await self.create_room(
             target=target,
             name=name,
             space=True,
             initial_state=initial_state,
+            invite=matrix_ids_to_invite,
         )
 
+        devices_room_id = await self.create_room(
+            target=target,
+            name="Devices",
+            space=True,
+            initial_state=initial_state,
+            invite=matrix_ids_to_invite,
+        )
+
+        for account in target.matrixcredentials_set.all():
+            # accept invites to rooms
+            await account.accept_invite(room_id)
+            await account.accept_invite(devices_room_id)
+
+        await self.add_subspace(target, room_id, devices_room_id)
+
         target.metadata["room_id"] = room_id
+        target.metadata["devices_room_id"] = room_id
 
         if target.database:
             initial_state[0]["content"]["fixture"] = target.database.to_fixture(json=True)
@@ -177,7 +223,7 @@ class MatrixSpace(MatrixRepresentation):
         await self.put_state(room_id, target, "f.database.target", initial_state[1]["content"])
 
         print("Created Matrix space for", name)
-        return {"room_id": room_id}
+        return {"room_id": room_id, "devices_room_id": devices_room_id}
 
 
 class MatrixSubSpace(MatrixSpace):
@@ -212,7 +258,7 @@ class MatrixSubSpace(MatrixSpace):
         model_class = repr_log.content_type.model_class()
         target_model = repr_log.target_type.model_class()
         instance = await model_class.objects.aget(pk=repr_log.object_id)
-        target = await target_model.objects.prefetch_related("matrixcredentials").aget(
+        target = await target_model.objects.prefetch_related("matrixcredentials_set").aget(
             pk=target_id
         )
         parent_room_id = target.metadata["room_id"]

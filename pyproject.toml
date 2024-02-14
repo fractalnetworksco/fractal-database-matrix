@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "fractal-database-matrix"
-version = "0.0.1"
+version = "0.0.2"
 description = ""
 authors = ["Justin <jrussel1055@gmail.com>"]
 readme = "README.md"

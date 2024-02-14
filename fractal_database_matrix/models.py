@@ -49,7 +49,7 @@ class MatrixReplicationTarget(ReplicationTarget):
 
     def get_creds(self) -> Union[MatrixCredentials, InMemoryMatrixCredentials]:
         current_db = Database.current_db()
-        current_device = Database.current_device()
+        current_device = Device.current_device()
         if current_db.is_root:
             return self.matrixcredentials_set.get(target=self, device=current_device)
         else:

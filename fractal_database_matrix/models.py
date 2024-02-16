@@ -18,15 +18,13 @@ class MatrixCredentials(BaseModel):
     matrix_id = models.CharField(max_length=255)
     password = models.CharField(max_length=255, blank=True, null=True)
     access_token = models.CharField(max_length=255)
-    target = models.ForeignKey(
-        "fractal_database_matrix.MatrixReplicationTarget", on_delete=models.CASCADE
-    )
+    targets = models.ManyToManyField("fractal_database_matrix.MatrixReplicationTarget")
     device = models.ForeignKey(Device, on_delete=models.CASCADE)
 
-    async def accept_invite(self, room_id: str):
+    async def accept_invite(self, room_id: str, target: "MatrixReplicationTarget"):
         from fractal_database.signals import _accept_invite
 
-        await _accept_invite(self, room_id, self.target.homeserver)
+        await _accept_invite(self, room_id, target.homeserver)
 
 
 class InMemoryMatrixCredentials(MatrixCredentials):
@@ -51,7 +49,7 @@ class MatrixReplicationTarget(ReplicationTarget):
         current_db = Database.current_db()
         current_device = Device.current_device()
         if current_db.is_root:
-            return self.matrixcredentials_set.get(target=self, device=current_device)
+            return self.matrixcredentials_set.get(device=current_device)
         else:
             try:
                 return InMemoryMatrixCredentials(

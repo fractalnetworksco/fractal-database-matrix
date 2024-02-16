@@ -77,8 +77,14 @@ class MatrixRepresentation(Representation):
 
         access_token, homeserver_url, _ = creds
 
-        if not any([matrix_id.islower() for matrix_id in invite]):
-            raise Exception("Matrix IDs must be lowercase")
+        # import pdb
+
+        # pdb.set_trace()
+
+        # verify that matrix IDs passed in invite are all lowercase
+        if invite:
+            if not any([matrix_id.split("@")[1].islower() for matrix_id in invite]):
+                raise Exception("Matrix IDs must be lowercase")
 
         async with MatrixClient(homeserver_url, access_token) as client:
             res = await client.room_create(
@@ -86,12 +92,15 @@ class MatrixRepresentation(Representation):
                 space=space,
                 initial_state=initial_state if initial_state else self.initial_state,
                 visibility=visibility,
-                invite=invite,
             )
             if isinstance(res, RoomCreateError):
                 raise Exception(res.message)
 
             room_id = res.room_id
+
+            for account in invite:
+                await client.invite(account, room_id, admin=True)
+
             print(f"Successfully created representation of {name} in Matrix: {room_id}")
 
         return res.room_id
@@ -154,7 +163,7 @@ class MatrixRoom(MatrixRepresentation):
 
         # accept invites to room
         for account in target.matrixcredentials_set.all():
-            await account.accept_invite(room_id)
+            await account.accept_invite(room_id, target)
 
         print("Created Matrix room for", name)
         return {"room_id": room_id}
@@ -187,7 +196,7 @@ class MatrixSpace(MatrixRepresentation):
             .aget(pk=repr_log.target_id)
         )  # type: ignore
 
-        matrix_ids_to_invite = [target.matrix_id for target in target.matrixcredentials_set.all()]
+        matrix_ids_to_invite = [cred.matrix_id for cred in target.matrixcredentials_set.all()]
         initial_state = deepcopy(self.initial_state)
         room_id = await self.create_room(
             target=target,
@@ -207,8 +216,8 @@ class MatrixSpace(MatrixRepresentation):
 
         for account in target.matrixcredentials_set.all():
             # accept invites to rooms
-            await account.accept_invite(room_id)
-            await account.accept_invite(devices_room_id)
+            await account.accept_invite(room_id, target)
+            await account.accept_invite(devices_room_id, target)
 
         await self.add_subspace(target, room_id, devices_room_id)
 

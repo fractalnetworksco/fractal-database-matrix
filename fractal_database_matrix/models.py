@@ -28,7 +28,7 @@ class MatrixCredentials(BaseModel):
 
 
 class InMemoryMatrixCredentials(MatrixCredentials):
-    homeserver = os.environ["MATRIX_HOMESERVER_URL"]
+    homeserver: str = ""
 
     class Meta:
         proxy = True
@@ -53,6 +53,7 @@ class MatrixReplicationTarget(ReplicationTarget):
         else:
             try:
                 return InMemoryMatrixCredentials(
+                    homeserver=os.environ["MATRIX_HOMESERVER_URL"],
                     matrix_id=os.environ["MATRIX_USER_ID"],
                     access_token=os.environ["MATRIX_ACCESS_TOKEN"],
                 )

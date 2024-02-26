@@ -2,7 +2,7 @@
 **.env*
 !**.env.example
 **venv*
-**/.coverage
+**.coverage*
 **/coverage.lcov
 **/build
 **/*.egg-info

@@ -5,7 +5,7 @@ from uuid import UUID
 from django.core.serializers import serialize
 from fractal.matrix import MatrixClient
 from fractal_database.representations import Representation
-from nio import RoomCreateError, RoomPutStateError, RoomVisibility
+from nio import AsyncClient, RoomCreateError, RoomPutStateError, RoomVisibility
 
 if TYPE_CHECKING:
     from fractal_database.models import (

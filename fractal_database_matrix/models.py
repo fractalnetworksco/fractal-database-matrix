@@ -78,7 +78,9 @@ class MatrixReplicationTarget(ReplicationTarget):
             return
 
         room_id = self.metadata["room_id"]
-        print(f"Pushing fixture(s): {replication_event} to {room_id}")
+        logger.info(
+            "Target %s is pushing fixture(s): %s to room %s" % (self, replication_event, room_id)
+        )
         creds = await self.aget_creds()
         broker = MatrixBroker().with_matrix_config(
             room_id=room_id,

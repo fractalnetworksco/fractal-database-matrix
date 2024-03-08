@@ -1,11 +1,10 @@
+import logging
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Optional, Sequence
-from uuid import UUID
 
-from django.core.serializers import serialize
 from fractal.matrix import MatrixClient
 from fractal_database.representations import Representation
-from nio import AsyncClient, RoomCreateError, RoomPutStateError, RoomVisibility
+from nio import RoomCreateError, RoomPutStateError, RoomVisibility
 
 if TYPE_CHECKING:
     from fractal_database.models import (
@@ -14,6 +13,8 @@ if TYPE_CHECKING:
         RepresentationLog,
     )
     from fractal_database_matrix.models import MatrixReplicationTarget
+
+logger = logging.getLogger(__name__)
 
 
 class MatrixRepresentation(Representation):
@@ -101,7 +102,10 @@ class MatrixRepresentation(Representation):
             for account in invite:
                 await client.invite(account, room_id, admin=True)
 
-            print(f"Successfully created representation of {name} in Matrix: {room_id}")
+            logger.info(
+                "Successfully created %s for %s in Matrix: %s"
+                % ("Room" if not space else "Space", name, room_id)
+            )
 
         return res.room_id
 
@@ -127,8 +131,9 @@ class MatrixRepresentation(Representation):
             if isinstance(res, RoomPutStateError):
                 raise Exception(res.message)
 
-            print(
-                f"Successfully added child space {child_room_id} to parent space {parent_room_id}"
+            logger.info(
+                "Successfully added child space %s to parent space %s"
+                % (child_room_id, parent_room_id)
             )
 
 
@@ -165,7 +170,7 @@ class MatrixRoom(MatrixRepresentation):
         for account in target.matrixcredentials_set.all():
             await account.accept_invite(room_id, target)
 
-        print("Created Matrix room for", name)
+        logger.info("Successfully created Matrix Room representation for %s" % name)
         return {"room_id": room_id}
 
 
@@ -195,6 +200,10 @@ class MatrixSpace(MatrixRepresentation):
             .prefetch_related("database__devices", "matrixcredentials_set", "instances")
             .aget(pk=repr_log.target_id)
         )  # type: ignore
+
+        logger.info(
+            "Creating Matrix space for %s on target %s" % (repr_log.metadata["name"], target)
+        )
 
         matrix_ids_to_invite = [cred.matrix_id for cred in target.matrixcredentials_set.all()]
         initial_state = deepcopy(self.initial_state)
@@ -231,7 +240,10 @@ class MatrixSpace(MatrixRepresentation):
         await self.put_state(room_id, target, "f.database", initial_state[0]["content"])
         await self.put_state(room_id, target, "f.database.target", initial_state[1]["content"])
 
-        print("Created Matrix space for", name)
+        logger.info(
+            "Successfully created Matrix Space representation for %s on target %s"
+            % (name, target)
+        )
         return {"room_id": room_id, "devices_room_id": devices_room_id}
 
 

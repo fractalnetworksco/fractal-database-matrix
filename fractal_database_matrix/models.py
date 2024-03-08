@@ -7,7 +7,6 @@ from asgiref.sync import sync_to_async
 from django.db import models
 from django.db.models.manager import BaseManager
 from fractal_database.models import BaseModel, Database, Device, ReplicationTarget
-from fractal_database.replication.tasks import replicate_fixture
 from taskiq import SendTaskError
 from taskiq_matrix.matrix_broker import MatrixBroker
 
@@ -69,6 +68,8 @@ class MatrixReplicationTarget(ReplicationTarget):
         to "kick" a replication task that all devices in the object's
         configured room will load.
         """
+        from fractal_database.replication.tasks import replicate_fixture
+
         # we have to serialize the fixture to json because Matrix has a non-standard
         # JSON encoding that doesn't allow floats
         replication_event = json.dumps(fixture)
@@ -78,7 +79,9 @@ class MatrixReplicationTarget(ReplicationTarget):
             return
 
         room_id = self.metadata["room_id"]
-        print(f"Pushing fixture(s): {replication_event} to {room_id}")
+        logger.info(
+            "Target %s is pushing fixture(s): %s to room %s" % (self, replication_event, room_id)
+        )
         creds = await self.aget_creds()
         broker = MatrixBroker().with_matrix_config(
             room_id=room_id,

@@ -153,6 +153,7 @@ class MatrixRoom(MatrixRepresentation):
         )
 
         # accept invites to room
+        print(target.matrixcredentials_set.all())
         for account in target.matrixcredentials_set.all():
             await account.accept_invite(room_id)
 

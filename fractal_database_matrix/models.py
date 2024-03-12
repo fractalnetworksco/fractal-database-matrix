@@ -48,7 +48,11 @@ class MatrixReplicationTarget(ReplicationTarget):
         current_db = Database.current_db()
         current_device = Device.current_device()
         if current_db.is_root:
-            return self.matrixcredentials_set.get(device=current_device)
+            try:
+                return self.matrixcredentials_set.get(device=current_device)
+            except MatrixCredentials.DoesNotExist as err:
+                raise Exception(f"Matrix credentials not found for {self}: {err}")
+
         else:
             try:
                 return InMemoryMatrixCredentials(
@@ -80,7 +84,8 @@ class MatrixReplicationTarget(ReplicationTarget):
 
         room_id = self.metadata["room_id"]
         logger.info(
-            "Target %s is pushing fixture(s): %s to room %s" % (self, replication_event, room_id)
+            "Target %s is pushing fixture(s): %s to room %s on homeserver %s"
+            % (self, replication_event, room_id, self.homeserver)
         )
         creds = await self.aget_creds()
         broker = MatrixBroker().with_matrix_config(

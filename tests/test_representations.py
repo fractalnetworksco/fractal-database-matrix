@@ -207,25 +207,39 @@ async def test_create_representation_matrix_space(
     assert "room_id" in result
 
 
-# Work in progress below
-# create_representation logs is listed as a def in repesentations
-# should that mean this funtions is a def and not async?
 def test_create_representation_logs(
     logged_in_db_auth_controller: AuthenticatedController, test_database, test_device
 ):
-    # not sure what cls is doing
-    # In the class Representation I see it used for method=cls.representaion_module
-    # cls
 
-    # the relationship b/w instance and Replication mode || target and Replication target
-    # look like a similar relationship as repr_log and RepresentationLog in create_representation
-    instance: "ReplicatedModel" = GenericForeignKey("target_type", "target_id")  # abstract model
-    # I assume something like this should be correct
-    # instance = ReplicatedModel.objects.create()
+    instance = test_database.primary_target()
 
-    # how does ReplicationTarget
-    # differ from MatrixReplicationTarget which
-    # I was using in the previoius funtions?
-    target: "ReplicationTarget"  # abstract model
+    target = instance
 
-    create_subspace = MatrixSpace.create_representation_logs(instance, target)
+    create_subspace = MatrixSubSpace.create_representation_logs(instance, target)
+    assert len(create_subspace) == 2
+    print(create_subspace[0].method)
+    assert create_subspace[0].instance == instance
+
+
+async def test_create_subspace_reprsentation(
+    logged_in_db_auth_controller: AuthenticatedController, test_database, test_device
+):
+    instance = test_database
+    target = await MatrixReplicationTarget.objects.acreate(name="test_target")
+    creds = await test_device.matrixcredentials_set.aget()
+    await sync_to_async(target.matrixcredentials_set.add)(creds)
+    # Field id expects a number
+    primary_target = await test_database.aprimary_target()
+    target_id = primary_target.pk
+    method = "some_method"  # method not used in tested function
+
+    # Creating representation log for testing
+    mock_repr_log = await RepresentationLog.objects.acreate(
+        instance=target,
+        method=method,
+        target=primary_target,
+        metadata=target.repr_metadata_props(),
+    )
+    subspace = MatrixSubSpace()
+
+    result = await subspace.create_representation(repr_log=mock_repr_log, target_id=target_id)

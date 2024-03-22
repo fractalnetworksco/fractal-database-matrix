@@ -234,8 +234,12 @@ class MatrixSpace(MatrixRepresentation):
         target.metadata["devices_room_id"] = room_id
 
         if target.database:
-            initial_state[0]["content"]["fixture"] = target.database.to_fixture(json=True)
-        initial_state[1]["content"]["fixture"] = target.to_fixture(json=True)
+            initial_state[0]["content"]["fixture"] = await target.database.ato_fixture(
+                json=True, with_relations=True
+            )
+        initial_state[1]["content"]["fixture"] = await target.ato_fixture(
+            json=True, with_relations=True
+        )
 
         await self.put_state(room_id, target, "f.database", initial_state[0]["content"])
         await self.put_state(room_id, target, "f.database.target", initial_state[1]["content"])

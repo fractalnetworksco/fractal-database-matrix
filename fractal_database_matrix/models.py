@@ -89,7 +89,6 @@ class MatrixReplicationTarget(ReplicationTarget):
         )
         creds = await self.aget_creds()
         broker = MatrixBroker().with_matrix_config(
-            room_id=room_id,
             homeserver_url=self.homeserver,
             access_token=creds.access_token,
         )

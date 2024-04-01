@@ -3,6 +3,7 @@ import secrets
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.db import transaction
 from fractal.cli.controllers.auth import AuthController
 from fractal_database.models import Database, Device
 
@@ -62,6 +63,18 @@ def second_test_device(db, test_database):
     unique_id = f"test-device-{secrets.token_hex(8)[:4]}"
 
     return Device.objects.create(name=unique_id)
+
+
+@pytest.fixture(scope="function")
+def test_target(db, test_database):
+    from fractal_database_matrix.models import MatrixReplicationTarget
+
+    with transaction.atomic():
+        target = MatrixReplicationTarget.objects.create(name="test_target")
+        device = Device.current_device()
+        creds = device.matrixcredentials_set.get()
+        target.matrixcredentials_set.add(creds)
+    return target
 
 
 # @pytest.fixture(scope="function")

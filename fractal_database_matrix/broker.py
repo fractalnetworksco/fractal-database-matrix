@@ -9,8 +9,8 @@ from taskiq_matrix.schedulesource import MatrixRoomScheduleSource
 broker = (
     MatrixBroker()
     .with_matrix_config(
-        homeserver_url=os.environ.get("MATRIX_HOMESERVER_URL"),
-        access_token=os.environ.get("MATRIX_ACCESS_TOKEN"),
+        os.environ.get("MATRIX_HOMESERVER_URL"),
+        os.environ.get("MATRIX_ACCESS_TOKEN"),
     )
     .with_result_backend(
         MatrixResultBackend(

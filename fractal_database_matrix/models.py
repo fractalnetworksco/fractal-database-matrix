@@ -14,8 +14,8 @@ from fractal_database.models import (
     ReplicationTarget,
     RepresentationLog,
 )
+from fractal_database_matrix.broker.broker import FractalMatrixBroker
 from taskiq import SendTaskError
-from taskiq_matrix.matrix_broker import MatrixBroker
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ class MatrixReplicationTarget(ReplicationTarget):
         except Exception as e:
             raise Exception(f"Cannot push replication log: {e}")
 
-        broker = MatrixBroker().with_matrix_config(
+        broker = FractalMatrixBroker().with_matrix_config(
             homeserver_url=self.homeserver,
             access_token=creds.access_token,
         )

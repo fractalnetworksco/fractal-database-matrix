@@ -1,7 +1,11 @@
 import json
-from typing import List, Tuple
+import logging
+from typing import List, Optional, Tuple
 
 from taskiq_matrix.matrix_queue import BroadcastQueue, Task
+from taskiq_matrix.utils import send_message
+
+logger = logging.getLogger(__name__)
 
 
 class ReplicationQueue(BroadcastQueue):
@@ -58,3 +62,29 @@ class ReplicationQueue(BroadcastQueue):
             task.data["args"][0] = json.dumps(self.prune_old_objects(fixture))
 
         return self.name, unacked_tasks
+
+    async def ack_msg(
+        self, task_id: str, room_id: str, tasks_to_ack: Optional[list[str]] = None
+    ) -> None:
+        """
+        Acks a given task id.
+
+        FIXME: ack list of tasks_to_ack
+        """
+        message = json.dumps(
+            {
+                "task_id": task_id,
+                "task": "{}",
+            }
+        )
+        logger.debug(
+            f"Sending ack for task {task_id} to room: {room_id}\nAck type: {self.task_types.ack}.{task_id}",
+        )
+        await send_message(
+            self.client,
+            room_id,
+            message=message,
+            msgtype=f"{self.task_types.ack}.{task_id}",
+            task_id=task_id,
+            queue=self.name,
+        )

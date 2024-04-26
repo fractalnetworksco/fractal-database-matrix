@@ -206,7 +206,13 @@ class MatrixSpace(MatrixRepresentation):
         )
 
         matrix_ids_to_invite = [cred.matrix_id for cred in target.matrixcredentials_set.all()]
-        initial_state = deepcopy(self.initial_state)
+        initial_state = [
+            {
+                "type": "f.database",
+                "content": {},
+            },
+            {"type": "f.database.target", "content": {}},
+        ]
         room_id = await self.create_room(
             target=target,
             name=name,

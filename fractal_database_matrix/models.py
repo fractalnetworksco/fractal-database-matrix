@@ -146,3 +146,9 @@ class MatrixReplicationTarget(ReplicationTarget):
         if Database.current_db().primary_target() != self:
             return "fractal_database_matrix.representations.MatrixSubSpace"
         return "fractal_database_matrix.representations.MatrixSpace"
+
+
+class BaseMatrixReplicationTarget(MatrixReplicationTarget):
+
+    class Meta:
+        abstract = True

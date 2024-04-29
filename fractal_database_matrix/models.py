@@ -152,3 +152,45 @@ class BaseMatrixReplicationTarget(MatrixReplicationTarget):
 
     class Meta:
         abstract = True
+
+
+class DeviceReplicationTarget(BaseMatrixReplicationTarget):
+    """ """
+
+    device = models.ForeignKey(
+        "fractal_database.Device",
+        on_delete=models.CASCADE,
+        related_name="device_replication_targets",
+    )
+
+    def repr_metadata_props(self) -> Dict[str, str]:
+        metadata = super().repr_metadata_props()
+        metadata["name"] = self.name
+        return metadata
+
+    def get_representation_module(self) -> str:
+        return "fractal_database_matrix.representations.DeviceRoom"
+
+    def create_representation_logs(self, instance: "ReplicatedModel"):
+        """
+        Create the representation logs (tasks) for creating a Matrix space
+        """
+        from fractal_database.models import RepresentationLog
+
+        repr_logs = []
+        # get the representation module specified by the provided instance
+        logger.info("Fetching representation module for %s" % instance)
+        repr_module = instance.get_representation_module()
+        if not repr_module:
+            # provided instance doesn't specify a representation module
+            return []
+
+        # create an instance of the representation module
+        repr_type = RepresentationLog._get_repr_instance(repr_module)
+
+        primary_target = self.database.primary_target()  # type: ignore
+
+        # call the create_representation_logs method on representation instance
+        repr_logs.extend(repr_type.create_representation_logs(instance, primary_target))
+
+        return repr_logs

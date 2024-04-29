@@ -27,7 +27,6 @@ class MatrixRepresentation(Representation):
     ]
 
     @classmethod
-    @property
     def representation_module(cls):
         return f"{cls.module}.{cls.__name__}"
 
@@ -275,7 +274,7 @@ class MatrixSubSpace(MatrixSpace):
         # create the representation log for adding the subspace to the parent space
         add_subspace_to_parent = RepresentationLog.objects.create(
             instance=instance,
-            method=cls.representation_module,
+            method=cls.representation_module(),
             target=target,
             metadata=instance.repr_metadata_props(),
         )
@@ -328,7 +327,7 @@ class MatrixSubRoom(MatrixSubSpace):
         # create the representation log for adding the subspace to the parent space
         add_subroom_to_parent = RepresentationLog.objects.create(
             instance=instance,
-            method=cls.representation_module,
+            method=cls.representation_module(),
             target=target,
             metadata=instance.repr_metadata_props(),
         )
@@ -351,17 +350,44 @@ class MatrixExistingSubSpace(MatrixSubSpace):
         # create the representation log for adding the subspace to the parent space
         add_subspace_to_parent = RepresentationLog.objects.create(
             instance=instance,
-            method=cls.representation_module,
+            method=cls.representation_module(),
             target=target,
             metadata=instance.repr_metadata_props(),
         )
         return [add_subspace_to_parent]
 
 
-class AppSpace(MatrixSpace):
-    initial_state = [
-        {
-            "type": "f.database.app",
-            "content": {},
-        }
-    ]
+class DeviceRoom(MatrixSubRoom):
+
+    async def create_representation(self, repr_log: "RepresentationLog", target_id: Any) -> None:
+        """ """
+        try:
+            name = repr_log.metadata["name"]
+        except KeyError:
+            raise Exception("name must be specified in metadata")
+
+        model_class = repr_log.content_type.model_class()  # type: ignore
+        instance = await model_class.objects.aget(pk=repr_log.object_id)
+
+        # fetch target in order to get credentials of users to invite to the apps subspace
+        target: "MatrixReplicationTarget" = (
+            await repr_log.target_type.model_class()
+            .objects.select_related("database")
+            .prefetch_related("database__devices", "matrixcredentials_set", "instances")
+            .aget(pk=repr_log.target_id)
+        )  # type: ignore
+
+        try:
+            device_space = target.metadata["devices_room_id"]
+        except Exception as err:
+            raise Exception(f"Failed to find device room id in target: {target}") from err
+
+        device_room_id = instance.metadata["room_id"]
+
+        await self.add_subspace(target, device_space, device_room_id)
+
+        logger.info(
+            "Successfully created Matrix Device room representation for %s on target %s"
+            % (name, target)
+        )
+        return None

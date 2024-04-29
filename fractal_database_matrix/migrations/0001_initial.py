@@ -13,33 +13,6 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='MatrixCredentials',
-            fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('date_created', models.DateTimeField(auto_now_add=True)),
-                ('date_modified', models.DateTimeField(auto_now=True)),
-                ('deleted', models.BooleanField(default=False)),
-                ('matrix_id', models.CharField(max_length=255)),
-                ('password', models.CharField(blank=True, max_length=255, null=True)),
-                ('access_token', models.CharField(max_length=255)),
-                ('device', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='fractal_database.device')),
-            ],
-            options={
-                'abstract': False,
-            },
-        ),
-        migrations.CreateModel(
-            name='InMemoryMatrixCredentials',
-            fields=[
-            ],
-            options={
-                'proxy': True,
-                'indexes': [],
-                'constraints': [],
-            },
-            bases=('fractal_database_matrix.matrixcredentials',),
-        ),
-        migrations.CreateModel(
             name='MatrixReplicationTarget',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
@@ -61,10 +34,44 @@ class Migration(migrations.Migration):
                 'abstract': False,
             },
         ),
-        migrations.AddField(
-            model_name='matrixcredentials',
-            name='targets',
-            field=models.ManyToManyField(to='fractal_database_matrix.matrixreplicationtarget'),
+        migrations.CreateModel(
+            name='MatrixCredentials',
+            fields=[
+                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ('date_created', models.DateTimeField(auto_now_add=True)),
+                ('date_modified', models.DateTimeField(auto_now=True)),
+                ('deleted', models.BooleanField(default=False)),
+                ('matrix_id', models.CharField(max_length=255)),
+                ('password', models.CharField(blank=True, max_length=255, null=True)),
+                ('access_token', models.CharField(max_length=255)),
+                ('device', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='fractal_database.device')),
+                ('targets', models.ManyToManyField(to='fractal_database_matrix.matrixreplicationtarget')),
+            ],
+            options={
+                'abstract': False,
+            },
+        ),
+        migrations.CreateModel(
+            name='InMemoryMatrixCredentials',
+            fields=[
+            ],
+            options={
+                'proxy': True,
+                'indexes': [],
+                'constraints': [],
+            },
+            bases=('fractal_database_matrix.matrixcredentials',),
+        ),
+        migrations.CreateModel(
+            name='DeviceReplicationTarget',
+            fields=[
+                ('matrixreplicationtarget_ptr', models.OneToOneField(auto_created=True, on_delete=django.db.models.deletion.CASCADE, parent_link=True, primary_key=True, serialize=False, to='fractal_database_matrix.matrixreplicationtarget')),
+                ('device', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='device_replication_targets', to='fractal_database.device')),
+            ],
+            options={
+                'abstract': False,
+            },
+            bases=('fractal_database_matrix.matrixreplicationtarget',),
         ),
         migrations.AddConstraint(
             model_name='matrixreplicationtarget',

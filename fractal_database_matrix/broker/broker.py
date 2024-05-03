@@ -13,6 +13,10 @@ logger = logging.getLogger(__file__)
 
 class FractalMatrixBroker(MatrixBroker):
     def _init_queues(self):
+        """
+        FIXME: Get all Database primary targets and instantiate a
+        ReplicationQueue for each target.
+        """
         super()._init_queues()
 
         if not hasattr(self, "replication_queue"):

@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 from typing import Any, Dict, List, Union
 
 from asgiref.sync import sync_to_async
@@ -10,9 +9,9 @@ from fractal_database.models import (
     BaseModel,
     Database,
     Device,
+    DurableOperation,
     ReplicatedModel,
     ReplicationTarget,
-    RepresentationLog,
 )
 from fractal_database_matrix.broker.broker import FractalMatrixBroker
 from taskiq import SendTaskError
@@ -26,11 +25,6 @@ class MatrixCredentials(BaseModel):
     access_token = models.CharField(max_length=255)
     targets = models.ManyToManyField("fractal_database_matrix.MatrixReplicationTarget")
     device = models.ForeignKey(Device, on_delete=models.CASCADE)
-
-    async def accept_invite(self, room_id: str, target: "MatrixReplicationTarget"):
-        from fractal_database.signals import _accept_invite
-
-        await _accept_invite(self, room_id, target.homeserver)
 
 
 class InMemoryMatrixCredentials(MatrixCredentials):
@@ -52,52 +46,59 @@ class MatrixReplicationTarget(ReplicationTarget):
     homeserver = models.CharField(max_length=255, null=False)
 
     def get_creds(self) -> Union[MatrixCredentials, InMemoryMatrixCredentials]:
-        current_db = Database.current_db()
         current_device = Device.current_device()
-        if current_db.is_root:
-            try:
-                return self.matrixcredentials_set.get(device=current_device)
-            except MatrixCredentials.DoesNotExist:
-                raise Exception(
-                    f"Target {self} does not have Matrix Credentials for current device {current_device}. Add credentials then call schedule_replication() on {self}"
-                )
+        try:
+            return self.matrixcredentials_set.get(device=current_device)
+        except MatrixCredentials.DoesNotExist:
+            raise Exception(
+                f"Target {self} does not have Matrix Credentials for current device {current_device}. Add credentials then call schedule_replication() on {self}"
+            )
 
-        else:
-            try:
-                return InMemoryMatrixCredentials(
-                    homeserver=os.environ["MATRIX_HOMESERVER_URL"],
-                    matrix_id=os.environ["MATRIX_USER_ID"],
-                    access_token=os.environ["MATRIX_ACCESS_TOKEN"],
-                )
-            except KeyError as e:
-                raise Exception(f"Required environment variable not set: {e}")
+        # else:
+        #     try:
+        #         return InMemoryMatrixCredentials(
+        #             homeserver=os.environ["MATRIX_HOMESERVER_URL"],
+        #             matrix_id=os.environ["MATRIX_USER_ID"],
+        #             access_token=os.environ["MATRIX_ACCESS_TOKEN"],
+        #         )
+        #     except KeyError as e:
+        #         raise Exception(f"Required environment variable not set: {e}")
 
     async def aget_creds(self):
         return await sync_to_async(self.get_creds)()
 
-    def create_representation_logs(self, instance: "ReplicatedModel"):
+    def create_durable_operations(self, instance: "ReplicatedModel"):
         """
-        Create the representation logs (tasks) for creating a Matrix space
+        Create the durable operations (tasks) for an instance.
         """
-        repr_logs = []
-        # get the representation module specified by the provided instance
-        logger.info("Fetching representation module for %s" % instance)
-        repr_module = instance.get_representation_module()
-        if not repr_module:
-            # provided instance doesn't specify a representation module
+        durable_operations = []
+        # get the operation module specified by the provided instance
+        logger.info("Fetching operation module for %s" % instance)
+        operation_module = instance.get_operation_module()
+        if not operation_module:
+            # provided instance doesn't specify an operation module
             return []
 
-        # create an instance of the representation module
-        repr_type = RepresentationLog._get_repr_instance(repr_module)
+        # create an instance of the operation module
+        operation = DurableOperation.get_operation(operation_module)
 
-        # call the create_representation_logs method on representation instance
+        # call the create_representation_logs method on operation instance
+        #     operation_module.extend(operation.create_durable_operations(instance, current_db_primary))
+        # else:
+
+        durable_operations.extend(operation.create_durable_operations(instance, self))
         current_db_primary = Database.current_db().primary_target()
-        if current_db_primary != self:
-            repr_logs.extend(repr_type.create_representation_logs(instance, current_db_primary))
-        else:
-            repr_logs.extend(repr_type.create_representation_logs(instance, self))
+        if current_db_primary != self and instance == self:
+            # if the current target is not the primary target of the current_db
+            # it should be added to the primary target as a subspace
+            operation = DurableOperation.get_operation(
+                "fractal_database_matrix.operations.AddExistingMatrixSubSpace"
+            )
+            durable_operations.extend(
+                operation.create_durable_operations(instance, current_db_primary)
+            )
 
-        return repr_logs
+        return durable_operations
 
     async def push_replication_log(self, fixture: List[Dict[str, Any]]) -> None:
         """
@@ -111,11 +112,12 @@ class MatrixReplicationTarget(ReplicationTarget):
         # JSON encoding that doesn't allow floats
         replication_event = json.dumps(fixture)
 
-        if not self.metadata.get("room_id"):
-            logger.warning(f"Unable to replicate, no room_id found for {self.name}")
-            return
+        try:
+            room_id = self.device_space
+        except Exception:
+            logger.warning("Unable to replicate, no room_id found for %s" % self.name)
+            return None
 
-        room_id = self.metadata["room_id"]
         logger.info(
             "Target %s is pushing fixture(s): %s to room %s on homeserver %s"
             % (self, replication_event, room_id, self.homeserver)
@@ -138,14 +140,12 @@ class MatrixReplicationTarget(ReplicationTarget):
         except SendTaskError as e:
             raise Exception(e.__cause__)
 
-    def get_representation_module(self) -> str:
-        from fractal_database.models import Database
-
-        # if creating a representation for a target that is not the primary target of the current_db
-        # we need to use the sub-space representation
-        if Database.current_db().primary_target() != self:
-            return "fractal_database_matrix.representations.MatrixSubSpace"
-        return "fractal_database_matrix.representations.MatrixSpace"
+    def get_operation_module(self) -> str:
+        # if creating a operation for a target that is not the primary target of the current_db
+        # we need to use the sub-space operation
+        # if Database.current_db().primary_target() != self:
+        #     return "fractal_database_matrix.operations.CreateMatrixSubDatabase"
+        return "fractal_database_matrix.operations.CreateMatrixDatabase"
 
 
 class BaseMatrixReplicationTarget(MatrixReplicationTarget):
@@ -154,43 +154,43 @@ class BaseMatrixReplicationTarget(MatrixReplicationTarget):
         abstract = True
 
 
-class DeviceReplicationTarget(BaseMatrixReplicationTarget):
-    """ """
+# class DeviceReplicationTarget(BaseMatrixReplicationTarget):
+#     """ """
 
-    device = models.ForeignKey(
-        "fractal_database.Device",
-        on_delete=models.CASCADE,
-        related_name="device_replication_targets",
-    )
+#     device = models.ForeignKey(
+#         "fractal_database.Device",
+#         on_delete=models.CASCADE,
+#         related_name="device_replication_targets",
+#     )
 
-    def repr_metadata_props(self) -> Dict[str, str]:
-        metadata = super().repr_metadata_props()
-        metadata["name"] = self.name
-        return metadata
+#     def repr_metadata_props(self) -> Dict[str, str]:
+#         metadata = super().repr_metadata_props()
+#         metadata["name"] = self.name
+#         return metadata
 
-    def get_representation_module(self) -> str:
-        return "fractal_database_matrix.representations.DeviceRoom"
+#     def get_operation_module(self) -> str:
+#         return "fractal_database_matrix.operations.DeviceRoom"
 
-    def create_representation_logs(self, instance: "ReplicatedModel"):
-        """
-        Create the representation logs (tasks) for creating a Matrix space
-        """
-        from fractal_database.models import RepresentationLog
+#     def create_durable_operations(self, instance: "ReplicatedModel"):
+#         """
+#         Create the representation logs (tasks) for creating a Matrix space
+#         """
+#         from fractal_database.models import DurableOperation
 
-        repr_logs = []
-        # get the representation module specified by the provided instance
-        logger.info("Fetching representation module for %s" % instance)
-        repr_module = instance.get_representation_module()
-        if not repr_module:
-            # provided instance doesn't specify a representation module
-            return []
+#         repr_logs = []
+#         # get the representation module specified by the provided instance
+#         logger.info("Fetching operation module for %s" % instance)
+#         repr_module = instance.get_operation_module()
+#         if not repr_module:
+#             # provided instance doesn't specify a representation module
+#             return []
 
-        # create an instance of the representation module
-        repr_type = RepresentationLog._get_repr_instance(repr_module)
+#         # create an instance of the representation module
+#         repr_type = DurableOperation.get_module_instance(repr_module)
 
-        primary_target = self.database.primary_target()  # type: ignore
+#         primary_target = self.database.primary_target()  # type: ignore
 
-        # call the create_representation_logs method on representation instance
-        repr_logs.extend(repr_type.create_representation_logs(instance, primary_target))
+#         # call the create_representation_logs method on representation instance
+#         repr_logs.extend(repr_type.create_durable_operations(instance, primary_target))
 
-        return repr_logs
+#         return repr_logs

@@ -45,6 +45,12 @@ class MatrixReplicationTarget(ReplicationTarget):
     registration_token = models.CharField(max_length=255, blank=True, null=True)
     homeserver = models.CharField(max_length=255, null=False)
 
+    def __str__(self):
+        if self.metadata.get("room_id"):
+            return f"{self.name} ({self.metadata['room_id']})"
+        else:
+            return self.name
+
     def get_creds(self) -> Union[MatrixCredentials, InMemoryMatrixCredentials]:
         current_device = Device.current_device()
         try:

@@ -53,9 +53,9 @@ class Migration(migrations.Migration):
                 ('primary', models.BooleanField(default=False)),
                 ('metadata', models.JSONField(default=dict)),
                 ('registration_token', models.CharField(blank=True, max_length=255, null=True)),
-                ('homeserver', models.CharField(max_length=255)),
+                ('homeserver', models.CharField(default=None, max_length=255)),
                 ('database', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='fractal_database.database')),
-                ('databases', models.ManyToManyField(related_name='%(app_label)s_%(class)s_databases', to='fractal_database.database')),
+                ('databases', models.ManyToManyField(related_name='%(class)s_databases', to='fractal_database.database')),
             ],
             options={
                 'abstract': False,

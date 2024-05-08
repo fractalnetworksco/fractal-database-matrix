@@ -10,6 +10,7 @@ from nio import RoomCreateError, RoomPutStateError, RoomVisibility
 
 if TYPE_CHECKING:
     from fractal_database.models import (
+        App,
         Device,
         DeviceMembership,
         DurableOperation,
@@ -258,7 +259,6 @@ class CreateMatrixSpace(MatrixOperation):
 
         logger.info("Creating Matrix space for %s on target %s" % (name, target))
 
-        matrix_ids_to_invite = [cred.matrix_id for cred in target.matrixcredentials_set.all()]
         initial_state = [
             {
                 "type": "f.database",
@@ -266,19 +266,12 @@ class CreateMatrixSpace(MatrixOperation):
             },
             {"type": "f.database.target", "content": {}},
         ]
-        logger.info("Inviting %s to the space" % matrix_ids_to_invite)
         room_id = await self.create_room(
             target=target,
             name=name,
             space=True,
             initial_state=initial_state,
-            invite=matrix_ids_to_invite,
         )
-
-        # accept invite on behalf of all local accounts that were invited
-        # FIXME: Break this out into its own Operation
-        for account in target.matrixcredentials_set.all():
-            await self.accept_invite_as_device(account, room_id, target.homeserver)
 
         target.metadata[metadata_label] = room_id
 
@@ -757,3 +750,62 @@ class CreateDeviceSubRoom(MatrixOperation):
             "Successfully Matrix Device room for %s as a subspace on target %s" % (name, target)
         )
         return None
+
+
+class CreateAppSpace(CreateMatrixDatabase):
+
+    @classmethod
+    def create_durable_operations(
+        cls,
+        instance: "ReplicatedModel",
+        target: "ReplicationTarget",
+    ):
+        """
+        Create the operations (tasks) for creating a Matrix space
+        """
+        from fractal_database.models import DurableOperation
+
+        create_app_subspace = super().create_durable_operations(instance, target)
+
+        create_app_subspace.append(
+            DurableOperation.objects.create(
+                instance=instance,
+                module=cls.operation_module(),
+                target=target,
+                metadata=instance.operation_metadata_props(),
+            )
+        )
+        return create_app_subspace
+
+    async def run(self, operation: "DurableOperation") -> dict[str, str]:
+        """ """
+        try:
+            name = operation.metadata["name"]
+        except KeyError:
+            raise Exception("name must be specified in metadata")
+
+        model_class = operation.content_type.model_class()  # type: ignore
+        instance: "App" = await model_class.objects.aget(pk=operation.object_id)
+
+        # fetch target in order to get credentials of users to invite to the apps subspace
+        target: "MatrixReplicationTarget" = (
+            await operation.target_type.model_class()
+            .objects.select_related("database")
+            .prefetch_related("database__devices", "matrixcredentials_set")
+            .aget(pk=operation.target_id)
+        )  # type: ignore
+
+        try:
+            app_space = instance.metadata["room_id"]
+        except Exception as err:
+            raise Exception(
+                f"Failed to find app room id in instance metadata: {instance}"
+            ) from err
+
+        await self.add_subspace(target, target.app_space, app_space)
+
+        logger.info(
+            "Successfully created App Space representation for %s in Matrix representation on target %s"
+            % (name, target)
+        )
+        return {"room_id": app_space}

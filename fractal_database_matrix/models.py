@@ -43,7 +43,7 @@ class MatrixReplicationTarget(ReplicationTarget):
     matrixcredentials_set: BaseManager[MatrixCredentials]
 
     registration_token = models.CharField(max_length=255, blank=True, null=True)
-    homeserver = models.CharField(max_length=255, null=False)
+    homeserver = models.CharField(max_length=255, null=False, blank=False, default=None)
 
     def __str__(self):
         if self.metadata.get("room_id"):
@@ -94,15 +94,15 @@ class MatrixReplicationTarget(ReplicationTarget):
 
         durable_operations.extend(operation.create_durable_operations(instance, self))
         current_db_primary = Database.current_db().primary_target()
-        if current_db_primary != self and instance == self:
-            # if the current target is not the primary target of the current_db
-            # it should be added to the primary target as a subspace
-            operation = DurableOperation.get_operation(
-                "fractal_database_matrix.operations.AddExistingMatrixSubSpace"
-            )
-            durable_operations.extend(
-                operation.create_durable_operations(instance, current_db_primary)
-            )
+        # if current_db_primary != self and instance == self:
+        #     # if the current target is not the primary target of the current_db
+        #     # it should be added to the primary target as a subspace
+        #     operation = DurableOperation.get_operation(
+        #         "fractal_database_matrix.operations.AddExistingMatrixSubSpace"
+        #     )
+        #     durable_operations.extend(
+        #         operation.create_durable_operations(instance, current_db_primary)
+        #     )
 
         return durable_operations
 
@@ -147,10 +147,6 @@ class MatrixReplicationTarget(ReplicationTarget):
             raise Exception(e.__cause__)
 
     def get_operation_module(self) -> str:
-        # if creating a operation for a target that is not the primary target of the current_db
-        # we need to use the sub-space operation
-        # if Database.current_db().primary_target() != self:
-        #     return "fractal_database_matrix.operations.CreateMatrixSubDatabase"
         return "fractal_database_matrix.operations.CreateMatrixDatabase"
 
 

@@ -4,7 +4,11 @@ from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 from fractal.cli.controllers.auth import AuthenticatedController
 from fractal.matrix import MatrixClient
-from fractal_database.models import DurableOperation, ReplicatedModel, ReplicationTarget
+from fractal_database.models import (
+    DurableOperation,
+    ReplicatedModel,
+    ReplicationChannel,
+)
 from fractal_database.operations import Operation
 from nio import RoomCreateError, RoomPutStateError, RoomVisibility
 
@@ -15,11 +19,11 @@ if TYPE_CHECKING:
         DeviceMembership,
         DurableOperation,
         ReplicatedModel,
-        ReplicationTarget,
+        ReplicationChannel,
     )
     from fractal_database_matrix.models import (
         MatrixCredentials,
-        MatrixReplicationTarget,
+        MatrixReplicationChannel,
     )
 
 logger = logging.getLogger(__name__)
@@ -29,7 +33,7 @@ class MatrixOperation(Operation):
     async def put_state(
         self,
         room_id: str,
-        target: "MatrixReplicationTarget",
+        target: "MatrixReplicationChannel",
         state_type: str,
         content: dict[str, Any],
     ) -> None:
@@ -51,7 +55,7 @@ class MatrixOperation(Operation):
 
     async def create_room(
         self,
-        target: "MatrixReplicationTarget",
+        target: "MatrixReplicationChannel",
         name: str,
         space: bool = False,
         initial_state: Optional[list[dict[str, Any]]] = None,
@@ -104,7 +108,7 @@ class MatrixOperation(Operation):
         return room_id
 
     async def add_subspace(
-        self, target: "MatrixReplicationTarget", parent_room_id: str, child_room_id: str
+        self, target: "MatrixReplicationChannel", parent_room_id: str, child_room_id: str
     ) -> None:
         creds = AuthenticatedController.get_creds()
         if not creds:
@@ -215,7 +219,7 @@ class CreateMatrixRoom(MatrixOperation):
         except KeyError:
             raise Exception("name must be specified in metadata")
 
-        target: "MatrixReplicationTarget" = (
+        target: "MatrixReplicationChannel" = (
             await operation.target_type.model_class()
             .objects.select_related("database")
             .prefetch_related("database__devices", "matrixcredentials_set")
@@ -250,7 +254,7 @@ class CreateMatrixSpace(MatrixOperation):
         except KeyError:
             raise Exception("name must be specified in metadata")
 
-        target: "MatrixReplicationTarget" = (
+        target: "MatrixReplicationChannel" = (
             await operation.target_type.model_class()
             .objects.select_related("database")
             .prefetch_related("database__devices", "matrixcredentials_set")
@@ -297,7 +301,7 @@ class CreateMatrixSubSpace(CreateMatrixSpace):
     def create_durable_operations(
         cls,
         instance: "ReplicatedModel",
-        target: "ReplicationTarget",
+        target: "ReplicationChannel",
     ):
         """
         Create the operations (tasks) for creating a Matrix subspace
@@ -315,13 +319,13 @@ class CreateMatrixSubSpace(CreateMatrixSpace):
         """
         # get the model the object that this operation is for
         # (this is usually a ReplicationTarget model since only ReplicationTargets run operations)
-        model_class: "MatrixReplicationTarget" = operation.content_type.model_class()  # type: ignore
+        model_class: "MatrixReplicationChannel" = operation.content_type.model_class()  # type: ignore
         # fetch the replicated model that this operation is for
         instance = await model_class.objects.aget(pk=operation.object_id)
         # get the model for the target that this operation is for
         target_model = operation.target_type.model_class()
         # fetch the target
-        target: "MatrixReplicationTarget" = await target_model.objects.prefetch_related(
+        target: "MatrixReplicationChannel" = await target_model.objects.prefetch_related(
             "matrixcredentials_set"
         ).aget(
             pk=operation.target_id
@@ -339,7 +343,7 @@ class CreateMatrixSubSpace(CreateMatrixSpace):
 class CreateDevicesSubSpace(CreateMatrixSubSpace):
 
     @classmethod
-    def create_durable_operations(cls, instance: ReplicatedModel, target: ReplicationTarget):
+    def create_durable_operations(cls, instance: ReplicatedModel, target: ReplicationChannel):
         from fractal_database.models import DurableOperation
 
         # create the operation for the creating the subspace
@@ -368,7 +372,7 @@ class CreateDevicesSubSpace(CreateMatrixSubSpace):
         """
         # get the target that this operation is for
         target_model = operation.target_type.model_class()
-        target: "MatrixReplicationTarget" = await target_model.objects.prefetch_related(
+        target: "MatrixReplicationChannel" = await target_model.objects.prefetch_related(
             "matrixcredentials_set"
         ).aget(
             pk=operation.target_id
@@ -385,7 +389,7 @@ class CreateDevicesSubSpace(CreateMatrixSubSpace):
 
 class CreateAppsSubSpace(CreateMatrixSubSpace):
     @classmethod
-    def create_durable_operations(cls, instance: ReplicatedModel, target: ReplicationTarget):
+    def create_durable_operations(cls, instance: ReplicatedModel, target: ReplicationChannel):
         from fractal_database.models import DurableOperation
 
         # create the operation for creating the subspace
@@ -414,7 +418,7 @@ class CreateAppsSubSpace(CreateMatrixSubSpace):
         """
         # get the target that this operation is for
         target_model = operation.target_type.model_class()
-        target: "MatrixReplicationTarget" = await target_model.objects.prefetch_related(
+        target: "MatrixReplicationChannel" = await target_model.objects.prefetch_related(
             "matrixcredentials_set"
         ).aget(
             pk=operation.target_id
@@ -434,7 +438,7 @@ class CreateMatrixDatabase(CreateMatrixSpace):
     def create_durable_operations(
         cls,
         instance: "ReplicatedModel",
-        target: "ReplicationTarget",
+        target: "ReplicationChannel",
     ):
         """
         Create the operations (tasks) for creating a Database in Matrix.
@@ -453,7 +457,7 @@ class CreateMatrixSubRoom(CreateMatrixSubSpace):
     def create_durable_operations(
         cls,
         instance: "ReplicatedModel",
-        target: "ReplicationTarget",
+        target: "ReplicationChannel",
     ):
         """
         Create the operations (tasks) for creating a Matrix subroom
@@ -480,7 +484,7 @@ class AddExistingMatrixSubSpace(CreateMatrixSubSpace):
     def create_durable_operations(
         cls,
         instance: "ReplicatedModel",
-        target: "ReplicationTarget",
+        target: "ReplicationChannel",
     ):
         """
         Create the operations (tasks) for adding an existing Matrix space
@@ -518,7 +522,7 @@ class SetDisplayName(MatrixOperation):
         )  # type: ignore
 
         # fetch target in order to get credentials of users to invite to the apps subspace
-        target: "MatrixReplicationTarget" = (
+        target: "MatrixReplicationChannel" = (
             await operation.target_type.model_class()
             .objects.select_related("database")
             .prefetch_related("database__devices", "matrixcredentials_set")
@@ -545,7 +549,7 @@ class RegisterDeviceAccount(MatrixOperation):
     def create_durable_operations(
         cls,
         instance: "ReplicatedModel",
-        target: "ReplicationTarget",
+        target: "ReplicationChannel",
     ):
         """
         Create the operations (tasks) for adding an existing Matrix space
@@ -583,7 +587,7 @@ class RegisterDeviceAccount(MatrixOperation):
         )  # type: ignore
 
         # fetch target in order to get credentials of users to invite to the apps subspace
-        target: "MatrixReplicationTarget" = (
+        target: "MatrixReplicationChannel" = (
             await operation.target_type.model_class()
             .objects.select_related("database")
             .prefetch_related("database__devices", "matrixcredentials_set")
@@ -619,7 +623,7 @@ class AcceptDeviceSpaceInvite(MatrixOperation):
         )  # type: ignore
 
         # fetch target in order to get credentials of users to invite to the apps subspace
-        target: "MatrixReplicationTarget" = (
+        target: "MatrixReplicationChannel" = (
             await operation.target_type.model_class()
             .objects.select_related("database")
             .prefetch_related("database__devices", "matrixcredentials_set")
@@ -649,7 +653,7 @@ class InviteDeviceToDeviceSpace(MatrixOperation):
         )  # type: ignore
 
         # fetch target in order to get credentials of users to invite to the apps subspace
-        target: "MatrixReplicationTarget" = (
+        target: "MatrixReplicationChannel" = (
             await operation.target_type.model_class()
             .objects.select_related("database")
             .prefetch_related("database__devices", "matrixcredentials_set")
@@ -674,7 +678,7 @@ class InviteDeviceToDeviceSpace(MatrixOperation):
     def create_durable_operations(
         cls,
         instance: "ReplicatedModel",
-        target: "ReplicationTarget",
+        target: "ReplicationChannel",
     ) -> list["DurableOperation"]:
         """
         Create the operations (tasks) for creating a Matrix space
@@ -694,7 +698,7 @@ class CreateDeviceSubRoom(MatrixOperation):
     def create_durable_operations(
         cls,
         instance: "ReplicatedModel",
-        target: "ReplicationTarget",
+        target: "ReplicationChannel",
     ):
         """
         Create the operations (tasks) for creating a Matrix space
@@ -731,7 +735,7 @@ class CreateDeviceSubRoom(MatrixOperation):
         instance: "DeviceMembership" = await model_class.objects.aget(pk=operation.object_id)  # type: ignore
 
         # fetch target in order to get credentials of users to invite to the apps subspace
-        target: "MatrixReplicationTarget" = (
+        target: "MatrixReplicationChannel" = (
             await operation.target_type.model_class()
             .objects.select_related("database")
             .prefetch_related("database__devices", "matrixcredentials_set")
@@ -758,7 +762,7 @@ class CreateAppSpace(CreateMatrixDatabase):
     def create_durable_operations(
         cls,
         instance: "ReplicatedModel",
-        target: "ReplicationTarget",
+        target: "ReplicationChannel",
     ):
         """
         Create the operations (tasks) for creating a Matrix space
@@ -788,7 +792,7 @@ class CreateAppSpace(CreateMatrixDatabase):
         instance: "App" = await model_class.objects.aget(pk=operation.object_id)
 
         # fetch target in order to get credentials of users to invite to the apps subspace
-        target: "MatrixReplicationTarget" = (
+        target: "MatrixReplicationChannel" = (
             await operation.target_type.model_class()
             .objects.select_related("database")
             .prefetch_related("database__devices", "matrixcredentials_set")

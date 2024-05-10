@@ -40,7 +40,7 @@ class Migration(migrations.Migration):
             bases=('fractal_database_matrix.matrixcredentials',),
         ),
         migrations.CreateModel(
-            name='MatrixReplicationTarget',
+            name='MatrixReplicationChannel',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ('date_created', models.DateTimeField(auto_now_add=True)),
@@ -50,12 +50,12 @@ class Migration(migrations.Migration):
                 ('name', models.CharField(max_length=255)),
                 ('enabled', models.BooleanField(default=True)),
                 ('filter', models.CharField(blank=True, max_length=255, null=True)),
-                ('primary', models.BooleanField(default=False)),
+                ('target', models.BooleanField(default=True)),
+                ('source', models.BooleanField(default=False)),
                 ('metadata', models.JSONField(default=dict)),
                 ('registration_token', models.CharField(blank=True, max_length=255, null=True)),
                 ('homeserver', models.CharField(default=None, max_length=255)),
                 ('database', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='fractal_database.database')),
-                ('databases', models.ManyToManyField(related_name='%(class)s_databases', to='fractal_database.database')),
             ],
             options={
                 'abstract': False,
@@ -64,10 +64,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='matrixcredentials',
             name='targets',
-            field=models.ManyToManyField(to='fractal_database_matrix.matrixreplicationtarget'),
-        ),
-        migrations.AddConstraint(
-            model_name='matrixreplicationtarget',
-            constraint=models.UniqueConstraint(condition=models.Q(('primary', True)), fields=('database',), name='fractal_database_matrix_matrixreplicationtarget_unique_primary_per_database'),
+            field=models.ManyToManyField(to='fractal_database_matrix.matrixreplicationchannel'),
         ),
     ]

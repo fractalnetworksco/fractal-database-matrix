@@ -9,8 +9,8 @@ from nio import AsyncClient
 if TYPE_CHECKING:
     from fractal_database.models import (
         ReplicatedModel,
+        ReplicationChannel,
         ReplicationLog,
-        ReplicationTarget,
     )
 
 HOMESERVER_URL = os.environ.get("MATRIX_HOMESERVER_URL")
@@ -28,7 +28,7 @@ async def get_or_create_representation(repr_metadata: Dict[str, Any], client: As
 async def replicate(
     log: "ReplicationLog",
     instance: "ReplicatedModel",
-    target: "ReplicationTarget",
+    target: "ReplicationChannel",
     defered_replications: Dict[str, Iterable["ReplicationLog"]],
 ):
     print(f"Running on_commit replication for {log}")

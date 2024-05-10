@@ -11,7 +11,7 @@ from fractal_database.models import (
     Device,
     DurableOperation,
     ReplicatedModel,
-    ReplicationTarget,
+    ReplicationChannel,
 )
 from fractal_database_matrix.broker.broker import FractalMatrixBroker
 from taskiq import SendTaskError
@@ -23,7 +23,7 @@ class MatrixCredentials(BaseModel):
     matrix_id = models.CharField(max_length=255)
     password = models.CharField(max_length=255, blank=True, null=True)
     access_token = models.CharField(max_length=255)
-    targets = models.ManyToManyField("fractal_database_matrix.MatrixReplicationTarget")
+    targets = models.ManyToManyField("fractal_database_matrix.MatrixReplicationChannel")
     device = models.ForeignKey(Device, on_delete=models.CASCADE)
 
 
@@ -38,7 +38,7 @@ class InMemoryMatrixCredentials(MatrixCredentials):
         raise Exception("Cannot save in-memory credentials")
 
 
-class MatrixReplicationTarget(ReplicationTarget):
+class MatrixReplicationChannel(ReplicationChannel):
     # type hint for the credentials foreign key relationship
     matrixcredentials_set: BaseManager[MatrixCredentials]
 
@@ -88,13 +88,10 @@ class MatrixReplicationTarget(ReplicationTarget):
         # create an instance of the operation module
         operation = DurableOperation.get_operation(operation_module)
 
-        # call the create_representation_logs method on operation instance
-        #     operation_module.extend(operation.create_durable_operations(instance, current_db_primary))
-        # else:
-
         durable_operations.extend(operation.create_durable_operations(instance, self))
-        current_db_primary = Database.current_db().primary_target()
-        # if current_db_primary != self and instance == self:
+
+        # FIXME!!!
+        # if  self.database.replication!= self and instance == self:
         #     # if the current target is not the primary target of the current_db
         #     # it should be added to the primary target as a subspace
         #     operation = DurableOperation.get_operation(
@@ -112,6 +109,9 @@ class MatrixReplicationTarget(ReplicationTarget):
         to "kick" a replication task that all devices in the object's
         configured room will load.
         """
+        if not self.target:
+            raise Exception("Channel cannot push replication logs if target property is False")
+
         from fractal_database.replication.tasks import replicate_fixture
 
         # we have to serialize the fixture to json because Matrix has a non-standard
@@ -150,7 +150,7 @@ class MatrixReplicationTarget(ReplicationTarget):
         return "fractal_database_matrix.operations.CreateMatrixDatabase"
 
 
-class BaseMatrixReplicationTarget(MatrixReplicationTarget):
+class BaseMatrixReplicationChannel(MatrixReplicationChannel):
 
     class Meta:
         abstract = True

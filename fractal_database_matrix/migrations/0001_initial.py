@@ -63,7 +63,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name='matrixcredentials',
-            name='targets',
+            name='channels',
             field=models.ManyToManyField(to='fractal_database_matrix.matrixreplicationchannel'),
         ),
     ]

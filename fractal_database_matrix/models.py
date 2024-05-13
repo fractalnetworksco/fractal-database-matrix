@@ -23,7 +23,7 @@ class MatrixCredentials(BaseModel):
     matrix_id = models.CharField(max_length=255)
     password = models.CharField(max_length=255, blank=True, null=True)
     access_token = models.CharField(max_length=255)
-    targets = models.ManyToManyField("fractal_database_matrix.MatrixReplicationChannel")
+    channels = models.ManyToManyField("fractal_database_matrix.MatrixReplicationChannel")
     device = models.ForeignKey(Device, on_delete=models.CASCADE)
 
 
@@ -57,7 +57,7 @@ class MatrixReplicationChannel(ReplicationChannel):
             return self.matrixcredentials_set.get(device=current_device)
         except MatrixCredentials.DoesNotExist:
             raise Exception(
-                f"Target {self} does not have Matrix Credentials for current device {current_device}. Add credentials then call schedule_replication() on {self}"
+                f"Channel {self} does not have Matrix Credentials for current device {current_device}. Add credentials then call schedule_replication() on {self}"
             )
 
         # else:

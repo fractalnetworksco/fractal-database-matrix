@@ -47,9 +47,9 @@ class MatrixReplicationChannel(ReplicationChannel):
 
     def __str__(self):
         if self.metadata.get("room_id"):
-            return f"{self.name} ({self.metadata['room_id']})"
+            return f"{self.name} ({self.metadata['room_id']} - MatrixReplicationTarget)"
         else:
-            return self.name
+            return f"{self.name} (MatrixReplicationTarget)"
 
     def get_creds(self) -> Union[MatrixCredentials, InMemoryMatrixCredentials]:
         current_device = Device.current_device()
@@ -90,16 +90,22 @@ class MatrixReplicationChannel(ReplicationChannel):
 
         durable_operations.extend(operation.create_durable_operations(instance, self))
 
-        # FIXME!!!
-        # if  self.database.replication!= self and instance == self:
-        #     # if the current target is not the primary target of the current_db
-        #     # it should be added to the primary target as a subspace
-        #     operation = DurableOperation.get_operation(
-        #         "fractal_database_matrix.operations.AddExistingMatrixSubSpace"
-        #     )
-        #     durable_operations.extend(
-        #         operation.create_durable_operations(instance, current_db_primary)
-        #     )
+        if isinstance(instance, ReplicationChannel):
+            # import pdb
+
+            # pdb.set_trace()
+            db_origin = instance.database.origin_channel()
+            # if this channel is not the origin channel for the db,
+            # then nest it under the origin channel
+            if db_origin and self != db_origin:
+                # if the current target is not the primary target of the current_db
+                # it should be added to the primary target as a subspace
+                operation = DurableOperation.get_operation(
+                    "fractal_database_matrix.operations.AddExistingMatrixSubSpace"
+                )
+                durable_operations.extend(
+                    operation.create_durable_operations(instance, db_origin)
+                )
 
         return durable_operations
 

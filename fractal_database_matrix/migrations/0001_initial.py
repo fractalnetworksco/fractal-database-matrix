@@ -51,7 +51,7 @@ class Migration(migrations.Migration):
                 ('enabled', models.BooleanField(default=True)),
                 ('filter', models.CharField(blank=True, max_length=255, null=True)),
                 ('target', models.BooleanField(default=True)),
-                ('source', models.BooleanField(default=False)),
+                ('source', models.BooleanField(default=True)),
                 ('metadata', models.JSONField(default=dict)),
                 ('registration_token', models.CharField(blank=True, max_length=255, null=True)),
                 ('homeserver', models.CharField(default=None, max_length=255)),

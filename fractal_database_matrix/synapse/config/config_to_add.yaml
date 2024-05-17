@@ -6,6 +6,17 @@ max_upload_size: 5000M
 
 # increasing default rate limiting burst counts to avoid tests hanging for unauthenticated
 # requtests to login
+rc_message:
+  per_second: 656565
+  burst_count: 656565
+rc_joins:
+  local:
+    per_second: 0.2
+    burst_count: 656565
+  remote:
+    per_second: 0.03
+    burst_count: 656565
+
 rc_login:
   address:
     per_second: 0.15

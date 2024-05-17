@@ -1,10 +1,11 @@
 import json
 import logging
-from typing import Any, Dict, List, Union
+import subprocess
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+import fractal_database_matrix
 from asgiref.sync import sync_to_async
-from django.db import models
-from django.db.models.manager import BaseManager
+from django.db import models, transaction
 from fractal_database.models import (
     BaseModel,
     Database,
@@ -12,18 +13,130 @@ from fractal_database.models import (
     DurableOperation,
     ReplicatedModel,
     ReplicationChannel,
+    Service,
+    ServiceInstanceConfig,
 )
 from fractal_database_matrix.broker.broker import FractalMatrixBroker
 from taskiq import SendTaskError
 
+if TYPE_CHECKING:
+    from .models import MatrixCredentials
+
 logger = logging.getLogger(__name__)
+
+# class MatrixHomeserver(BaseModel):
+#     url = models.URLField(primary_key=True) # is the homeserver url
+
+
+class MatrixHomeserver(Service):
+    SYNAPSE_COMPOSE_FILE_PATH = f"{fractal_database_matrix.__path__[0]}/synapse"
+    SYNAPSE_LOCAL = "http://localhost:8008"
+
+    credentials: models.QuerySet["MatrixCredentials"]
+
+    url = models.URLField()
+    priority = models.PositiveIntegerField(default=0, blank=True, null=True)
+    registration_token = models.CharField(max_length=255, blank=True, null=True)
+
+    def __str__(self) -> str:
+        return f"{self.url} (MatrixHomeserver)"
+
+    @classmethod
+    def create(cls, device: Optional["Device"] = None, **ckwargs) -> None:
+        name = ckwargs.get("name", "Synapse")
+        url = ckwargs.get("url", cls.SYNAPSE_LOCAL)
+        homeserver = cls.objects.create(name=name, url=url, **ckwargs)
+        if not device:
+            device = Device.current_device()
+
+        ServiceInstanceConfig.objects.create(
+            service=homeserver,
+            current_device=device,
+            target_state="running",
+        )
+
+        logger.info(
+            "Created homeserver %s with and assigned the current device %s to run the app."
+            % (homeserver, device)
+        )
+        return None
+
+    def launch(self, config: "ServiceInstanceConfig"):
+        """
+        Launch the service.
+        """
+        logger.info("Launching app %s with config %s", self.name, config)
+        current_db = Database.current_db()
+        compose_project_name = f'{self.name.lower()}_{current_db.name.replace(" ", "_").lower()}'
+        proc = subprocess.Popen(
+            [
+                "docker-compose",
+                "-f",
+                f"{self.SYNAPSE_COMPOSE_FILE_PATH}/docker-compose.yml",
+                "-p",
+                compose_project_name,
+                "up",
+                "-d",
+                "--force-recreate",
+            ],
+            stdout=subprocess.PIPE,
+        )
+        proc.communicate()
+
+    def stop(self, config: "ServiceInstanceConfig"):
+        """
+        Stop the service.
+        """
+        logger.info("Stopping app %s with config %s", config.service.name, config)
+        app_name = config.service.name
+        current_db = Database.current_db()
+        compose_project_name = f'{app_name}_{current_db.name.replace(" ", "_").lower()}'
+        proc = subprocess.Popen(
+            [
+                "docker-compose",
+                "-f",
+                f"{self.SYNAPSE_COMPOSE_FILE_PATH}/docker-compose.yml",
+                "-p",
+                compose_project_name,
+                "down",
+                "--remove-orphans",
+            ],
+            stdout=subprocess.PIPE,
+        )
+        proc.communicate()
+
+    def save(self, *args, **kwargs):
+        # ensure that save is running in a transaction
+        if not transaction.get_connection().in_atomic_block:
+            with transaction.atomic():
+                return self.save(*args, **kwargs)
+
+        # priority is always set to the last priority + 1
+        if self._state.adding:
+            last_priority = MatrixHomeserver.objects.all().aggregate(models.Max("priority"))[
+                "priority__max"
+            ]
+            self.priority = (last_priority or 0) + 1
+
+        return super().save(*args, **kwargs)
+
+    def operation_metadata_props(self) -> Dict[str, str]:
+        """
+        Returns the operation metadata properties for this homeserver.
+        """
+        return {"url": "url"}
+
+    def get_operation_module(self) -> str:
+        return "fractal_database_matrix.operations.RegisterOwnedDevices"
 
 
 class MatrixCredentials(BaseModel):
     matrix_id = models.CharField(max_length=255)
     password = models.CharField(max_length=255, blank=True, null=True)
     access_token = models.CharField(max_length=255)
-    channels = models.ManyToManyField("fractal_database_matrix.MatrixReplicationChannel")
+    homeserver = models.ForeignKey(
+        MatrixHomeserver, on_delete=models.CASCADE, related_name="credentials"
+    )
     device = models.ForeignKey(Device, on_delete=models.CASCADE)
 
 
@@ -39,11 +152,10 @@ class InMemoryMatrixCredentials(MatrixCredentials):
 
 
 class MatrixReplicationChannel(ReplicationChannel):
-    # type hint for the credentials foreign key relationship
-    matrixcredentials_set: BaseManager[MatrixCredentials]
-
     registration_token = models.CharField(max_length=255, blank=True, null=True)
-    homeserver = models.CharField(max_length=255, null=False, blank=False, default=None)
+    homeserver = models.ForeignKey(
+        MatrixHomeserver, on_delete=models.CASCADE, related_name="channels"
+    )
 
     def __str__(self):
         if self.metadata.get("room_id"):
@@ -51,14 +163,8 @@ class MatrixReplicationChannel(ReplicationChannel):
         else:
             return f"{self.name} (MatrixReplicationTarget)"
 
-    def get_creds(self) -> Union[MatrixCredentials, InMemoryMatrixCredentials]:
-        current_device = Device.current_device()
-        try:
-            return self.matrixcredentials_set.get(device=current_device)
-        except MatrixCredentials.DoesNotExist:
-            raise Exception(
-                f"Channel {self} does not have Matrix Credentials for current device {current_device}. Add credentials then call schedule_replication() on {self}"
-            )
+    def get_creds(self) -> MatrixCredentials | InMemoryMatrixCredentials:
+        return Device.current_device().get_creds(self.homeserver)
 
         # else:
         #     try:
@@ -124,6 +230,8 @@ class MatrixReplicationChannel(ReplicationChannel):
         # JSON encoding that doesn't allow floats
         replication_event = json.dumps(fixture)
 
+        await sync_to_async(lambda: self.homeserver)()
+
         try:
             room_id = self.device_space
         except Exception:
@@ -141,7 +249,7 @@ class MatrixReplicationChannel(ReplicationChannel):
             raise Exception(f"Cannot push replication log: {e}")
 
         broker = FractalMatrixBroker().with_matrix_config(
-            homeserver_url=self.homeserver,
+            homeserver_url=self.homeserver.url,
             access_token=creds.access_token,
         )
 

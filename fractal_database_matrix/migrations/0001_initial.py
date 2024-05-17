@@ -13,6 +13,19 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
+            name='MatrixHomeserver',
+            fields=[
+                ('service_ptr', models.OneToOneField(auto_created=True, on_delete=django.db.models.deletion.CASCADE, parent_link=True, primary_key=True, serialize=False, to='fractal_database.service')),
+                ('url', models.URLField()),
+                ('priority', models.PositiveIntegerField(blank=True, default=0, null=True)),
+                ('registration_token', models.CharField(blank=True, max_length=255, null=True)),
+            ],
+            options={
+                'abstract': False,
+            },
+            bases=('fractal_database.service',),
+        ),
+        migrations.CreateModel(
             name='MatrixCredentials',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
@@ -23,6 +36,7 @@ class Migration(migrations.Migration):
                 ('password', models.CharField(blank=True, max_length=255, null=True)),
                 ('access_token', models.CharField(max_length=255)),
                 ('device', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='fractal_database.device')),
+                ('homeserver', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='credentials', to='fractal_database_matrix.matrixhomeserver')),
             ],
             options={
                 'abstract': False,
@@ -53,17 +67,13 @@ class Migration(migrations.Migration):
                 ('target', models.BooleanField(default=True)),
                 ('source', models.BooleanField(default=True)),
                 ('metadata', models.JSONField(default=dict)),
+                ('database_type', models.CharField(max_length=255)),
                 ('registration_token', models.CharField(blank=True, max_length=255, null=True)),
-                ('homeserver', models.CharField(default=None, max_length=255)),
                 ('database', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='fractal_database.database')),
+                ('homeserver', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='channels', to='fractal_database_matrix.matrixhomeserver')),
             ],
             options={
                 'abstract': False,
             },
-        ),
-        migrations.AddField(
-            model_name='matrixcredentials',
-            name='channels',
-            field=models.ManyToManyField(to='fractal_database_matrix.matrixreplicationchannel'),
         ),
     ]

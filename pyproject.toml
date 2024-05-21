@@ -2,8 +2,9 @@
 name = "fractal-database-matrix"
 version = "0.0.6"
 description = ""
-authors = ["Justin <jrussel1055@gmail.com>"]
+authors = ["Justin <justin@fractalnetworks.co"]
 readme = "README.md"
+include = ["synapse/**"]
 
 [tool.poetry.dependencies]
 python = "^3.10"

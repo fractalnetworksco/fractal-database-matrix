@@ -1,4 +1,4 @@
 from django.contrib import admin
-from fractal_database_matrix.models import MatrixReplicationTarget
+from fractal_database_matrix.models import MatrixReplicationChannel
 
-admin.site.register(MatrixReplicationTarget)
+admin.site.register(MatrixReplicationChannel)

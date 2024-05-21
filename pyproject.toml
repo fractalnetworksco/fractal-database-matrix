@@ -26,3 +26,6 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.extras]
 dev = ["pytest-django", "pytest", "pytest-cov", "pytest-mock", "pytest-asyncio", "ipython"]
+
+[tool.poetry.plugins."fractal.plugins"]
+"matrix" = "fractal_database_matrix.controllers.matrix"

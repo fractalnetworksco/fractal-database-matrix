@@ -714,7 +714,7 @@ class CreateMatrixDatabase(CreateMatrixSpace):
         # create the operations for creating the device and app subspaces
         database_space.extend(CreateDevicesSubSpace.create_durable_operations(instance, channel))
 
-        device_memberships = instance.database.devices.all()
+        device_memberships = instance.database.device_memberships.all()
         for device_membership in device_memberships:
             database_space.extend(
                 RegisterDeviceAccount.create_durable_operations(device_membership.device, channel)

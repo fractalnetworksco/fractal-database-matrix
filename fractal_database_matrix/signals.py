@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from fractal.cli.controllers.auth import AuthenticatedController
 
 if TYPE_CHECKING:
     from fractal_database_matrix.models import MatrixHomeserver
@@ -28,7 +29,13 @@ def create_replication_channel_for_new_matrix_homeserver(
     if not transaction.get_connection().in_atomic_block:
         raise Exception("Not in transaction")
 
-    # since object is being loaded in via fixture, we need to reload it to get the latest state
+    creds = AuthenticatedController().get_creds()
+    if not creds:
+        logger.warning("Will not create Matrix replication channel without being logged in")
+        return
+
+    # since object is potentially being loaded in via fixture,
+    # we need to reload it to get the latest state
     homeserver = sender.objects.get(pk=instance.pk)
 
     current_db = Database.current_db()

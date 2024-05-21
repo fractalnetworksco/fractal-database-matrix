@@ -2,7 +2,7 @@
 name = "fractal-database-matrix"
 version = "0.0.6"
 description = ""
-authors = ["Justin <justin@fractalnetworks.co"]
+authors = ["Justin Russell <justin@fractalnetworks.co>"]
 readme = "README.md"
 include = ["synapse/**"]
 

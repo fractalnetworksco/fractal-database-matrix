@@ -4,6 +4,7 @@ import subprocess
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import fractal_database_matrix
+import yaml
 from asgiref.sync import sync_to_async
 from django.db import models, transaction
 from fractal_database.models import (
@@ -20,7 +21,10 @@ from fractal_database_matrix.broker.broker import FractalMatrixBroker
 from taskiq import SendTaskError
 
 if TYPE_CHECKING:
+    from fractal.gateway.models import Gateway
+
     from .models import MatrixCredentials
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +37,7 @@ class MatrixHomeserver(Service):
     SYNAPSE_LOCAL = "http://localhost:8008"
 
     credentials: models.QuerySet["MatrixCredentials"]
+    gateways: models.QuerySet["Gateway"]
 
     url = models.URLField()
     priority = models.PositiveIntegerField(default=0, blank=True, null=True)
@@ -43,17 +48,40 @@ class MatrixHomeserver(Service):
 
     @classmethod
     def create(cls, device: Optional["Device"] = None, **ckwargs) -> None:
-        name = ckwargs.get("name", "Synapse")
-        url = ckwargs.get("url", cls.SYNAPSE_LOCAL)
-        homeserver = cls.objects.create(name=name, url=url, **ckwargs)
-        if not device:
-            device = Device.current_device()
+        name = ckwargs.pop("name", "Synapse")
+        url = ckwargs.pop("url", cls.SYNAPSE_LOCAL)
+        with transaction.atomic():
+            homeserver = cls.objects.create(name=name, url=url, type=cls.__name__, **ckwargs)
 
-        ServiceInstanceConfig.objects.create(
-            service=homeserver,
-            current_device=device,
-            target_state="running",
-        )
+            link = None
+            # only attempt to create a link if the current database has the gateways attribute
+            try:
+                from fractal.gateway.models import Gateway
+            except ImportError:
+                logger.warning(
+                    "Gateway model not found. Your homeserver will only be accessible locally"
+                )
+            else:
+                # FIXME: handle multiple gateways
+                gateway = Gateway.objects.first()
+                if not gateway:
+                    raise Exception("No gateway found for MatrixHomeserver %s" % homeserver)
+
+                homeserver.gateways.add(gateway)
+                link = gateway.create_link(url, override_link=True)
+
+            if not device:
+                device = Device.current_device()
+
+            config = ServiceInstanceConfig.objects.create(
+                service=homeserver,
+                current_device=device,
+                target_state="running",
+            )
+
+            # add link to config if it was created
+            if link:
+                config.links.add(link)
 
         logger.info(
             "Created homeserver %s with and assigned the current device %s to run the app."
@@ -61,49 +89,42 @@ class MatrixHomeserver(Service):
         )
         return None
 
-    def launch(self, config: "ServiceInstanceConfig"):
-        """
-        Launch the service.
-        """
-        logger.info("Launching app %s with config %s", self.name, config)
-        current_db = Database.current_db()
-        compose_project_name = f'{self.name.lower()}_{current_db.name.replace(" ", "_").lower()}'
-        proc = subprocess.Popen(
-            [
-                "docker-compose",
-                "-f",
-                f"{self.SYNAPSE_COMPOSE_FILE_PATH}/docker-compose.yml",
-                "-p",
-                compose_project_name,
-                "up",
-                "-d",
-                "--force-recreate",
-            ],
-            stdout=subprocess.PIPE,
-        )
-        proc.communicate()
+    def _render_compose_file(self, app_config: ServiceInstanceConfig) -> str:
 
-    def stop(self, config: "ServiceInstanceConfig"):
-        """
-        Stop the service.
-        """
-        logger.info("Stopping app %s with config %s", config.service.name, config)
-        app_name = config.service.name
-        current_db = Database.current_db()
-        compose_project_name = f'{app_name}_{current_db.name.replace(" ", "_").lower()}'
-        proc = subprocess.Popen(
-            [
-                "docker-compose",
-                "-f",
-                f"{self.SYNAPSE_COMPOSE_FILE_PATH}/docker-compose.yml",
-                "-p",
-                compose_project_name,
-                "down",
-                "--remove-orphans",
-            ],
-            stdout=subprocess.PIPE,
-        )
-        proc.communicate()
+        with open(f"{self.SYNAPSE_COMPOSE_FILE_PATH}/docker-compose.yml") as f:
+            compose_file = yaml.safe_load(f)
+
+        # FIXME: handle multiple links
+        if not hasattr(app_config, "links") or not hasattr(self, "gateways"):
+            logger.warning(
+                "Matrix Homeserver %s ServiceInstanceConfig does not have any links or gateways. Your Matrix Homeserver will only work locally."
+                % self
+            )
+            return yaml.dump(compose_file)
+
+        link = app_config.links.first()
+        if not link:
+            logger.warning(
+                "Matrix Homeserver %s ServiceInstanceConfig does not have any links or gateways. Your Matrix Homeserver will only work locally."
+                % self
+            )
+            return yaml.dump(compose_file)
+
+        for service in compose_file["services"]:
+            if "expose" in compose_file["services"][service]:
+                expose = compose_file["services"][service]["expose"][0]
+                compose_file["services"][service]["environment"]["SERVER_NAME"] = link.fqdn
+                break
+        else:
+            raise Exception("No service with expose key found in compose file")
+
+        gateway = self.gateways.first()
+        if not gateway:
+            raise Exception("No gateway found for MatrixHomeserver %s" % self)
+
+        snippet = yaml.safe_load(link.generate_compose_snippet(self.gateways.first(), expose))
+        compose_file["services"].update(snippet)
+        return yaml.dump(compose_file)
 
     def save(self, *args, **kwargs):
         # ensure that save is running in a transaction
@@ -197,9 +218,6 @@ class MatrixReplicationChannel(ReplicationChannel):
         durable_operations.extend(operation.create_durable_operations(instance, self))
 
         if isinstance(instance, ReplicationChannel):
-            # import pdb
-
-            # pdb.set_trace()
             db_origin = instance.database.origin_channel()
             # if this channel is not the origin channel for the db,
             # then nest it under the origin channel

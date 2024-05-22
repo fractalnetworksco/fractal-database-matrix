@@ -18,9 +18,11 @@ class MatrixController:
 
     @use_django
     @cli_method
-    def init(self, *args, **kwargs):
+    def init(self, url: str, *args, **kwargs):
         """
         ---
+        Args:
+            url: URL of the homeserver.
         """
         from fractal_database.models import Database
         from fractal_database_matrix.models import MatrixHomeserver
@@ -31,7 +33,7 @@ class MatrixController:
             print("Database not found. Get started by creating your database with")
             print("fractal database init")
 
-        homeserver = MatrixHomeserver.create()
+        homeserver = MatrixHomeserver.create(url=url)
 
         # self._launch_server()
 

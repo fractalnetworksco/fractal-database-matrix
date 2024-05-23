@@ -50,25 +50,28 @@ class MatrixHomeserver(Service):
     def create(cls, device: Optional["Device"] = None, **ckwargs) -> None:
         name = ckwargs.pop("name", "Synapse")
         url = ckwargs.pop("url", cls.SYNAPSE_LOCAL)
+
+        gateway = None
+        link = None
+        # only attempt to create a link if the current database has the gateways attribute
+        try:
+            from fractal.gateway.models import Gateway
+        except ImportError:
+            logger.warning(
+                "Gateway model not found. Your homeserver will only be accessible locally"
+            )
+        else:
+            # FIXME: handle multiple gateways
+            gateway = Gateway.objects.first()
+            if not gateway:
+                raise Exception("No gateway found for MatrixHomeserver %s" % homeserver)
+            link = gateway.create_link(url, override_link=True)
+
         with transaction.atomic():
             homeserver = cls.objects.create(name=name, url=url, type=cls.__name__, **ckwargs)
 
-            link = None
-            # only attempt to create a link if the current database has the gateways attribute
-            try:
-                from fractal.gateway.models import Gateway
-            except ImportError:
-                logger.warning(
-                    "Gateway model not found. Your homeserver will only be accessible locally"
-                )
-            else:
-                # FIXME: handle multiple gateways
-                gateway = Gateway.objects.first()
-                if not gateway:
-                    raise Exception("No gateway found for MatrixHomeserver %s" % homeserver)
-
+            if gateway:
                 homeserver.gateways.add(gateway)
-                link = gateway.create_link(url, override_link=True)
 
             if not device:
                 device = Device.current_device()
@@ -90,7 +93,7 @@ class MatrixHomeserver(Service):
         return None
 
     def _render_compose_file(self, app_config: ServiceInstanceConfig) -> str:
-
+        """ """
         with open(f"{self.SYNAPSE_COMPOSE_FILE_PATH}/docker-compose.yml") as f:
             compose_file = yaml.safe_load(f)
 

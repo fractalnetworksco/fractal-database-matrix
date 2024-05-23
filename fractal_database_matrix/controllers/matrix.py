@@ -35,7 +35,13 @@ class MatrixController:
 
         homeserver = MatrixHomeserver.create(url=url)
 
-        # self._launch_server()
+        # prompt user for credentials for their account
+
+        # register their account (and login)
+
+        # after that, register their devices
+
+        # launch worker for current device
 
 
 Controller = MatrixController

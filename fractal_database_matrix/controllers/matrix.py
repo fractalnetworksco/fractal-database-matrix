@@ -1,6 +1,11 @@
+from getpass import getpass
+
 import docker
 from clicz import cli_method
+from fractal.cli.controllers.registration import RegistrationController
 from fractal_database.utils import use_django
+
+from .replicate import ReplicationController
 
 
 class MatrixController:
@@ -36,12 +41,37 @@ class MatrixController:
         homeserver = MatrixHomeserver.create(url=url)
 
         # prompt user for credentials for their account
+        matrix_id = input(f"Enter your desired matrix ID (@userid:{homeserver.url}): ")
+
+        password = getpass(f"Enter your desired password for {matrix_id}: ")
 
         # register their account (and login)
+        # NOTE: Assuming that matrix is being launched locally for now
+        reg_controller = RegistrationController()
+        reg_controller.register(
+            matrix_id=matrix_id,
+            password=password,
+            homeserver_url=homeserver.url,
+            local=True,
+        )
 
-        # after that, register their devices
+        # generate a registration token for the homeserver so that devices can be registered
+        registration_token = reg_controller.token("create")
 
-        # launch worker for current device
+        resp = input(
+            "Would you like to replicate your data to this homeserver? (yes/no): "
+        ).lower()
+        if resp == "yes" or resp == "y":
+            ReplicationController().to(
+                homeserver.url, registration_token, no_confirm=True, set_as_origin=True
+            )
+        else:
+            # TODO: Save the registration token!
+            print(
+                f"You can replicate your data later with `fractal replicate to {homeserver.url} {registration_token}`"
+            )
+
+        # TODO: launch worker for current device
 
 
 Controller = MatrixController

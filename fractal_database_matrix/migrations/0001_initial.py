@@ -68,7 +68,6 @@ class Migration(migrations.Migration):
                 ('source', models.BooleanField(default=True)),
                 ('metadata', models.JSONField(default=dict)),
                 ('database_type', models.CharField(max_length=255)),
-                ('registration_token', models.CharField(blank=True, max_length=255, null=True)),
                 ('database', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='fractal_database.database')),
                 ('homeserver', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='channels', to='fractal_database_matrix.matrixhomeserver')),
             ],

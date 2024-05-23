@@ -47,7 +47,7 @@ class MatrixHomeserver(Service):
         return f"{self.url} (MatrixHomeserver)"
 
     @classmethod
-    def create(cls, device: Optional["Device"] = None, **ckwargs) -> None:
+    def create(cls, device: Optional["Device"] = None, **ckwargs) -> "MatrixHomeserver":
         name = ckwargs.pop("name", "Synapse")
         url = ckwargs.pop("url", cls.SYNAPSE_LOCAL)
 
@@ -68,7 +68,14 @@ class MatrixHomeserver(Service):
             link = gateway.create_link(url, override_link=True)
 
         with transaction.atomic():
-            homeserver = cls.objects.create(name=name, url=url, type=cls.__name__, **ckwargs)
+            if "localhost" in url:
+                # since links created that have .localhost wont resolve
+                # on the nio.MatrixClient, replace it with the local url
+                homeserver = cls.objects.create(
+                    name=name, url=cls.SYNAPSE_LOCAL, type=cls.__name__, **ckwargs
+                )
+            else:
+                homeserver = cls.objects.create(name=name, url=url, type=cls.__name__, **ckwargs)
 
             if gateway:
                 homeserver.gateways.add(gateway)
@@ -90,7 +97,7 @@ class MatrixHomeserver(Service):
             "Created homeserver %s with and assigned the current device %s to run the app."
             % (homeserver, device)
         )
-        return None
+        return homeserver
 
     def _render_compose_file(self, app_config: ServiceInstanceConfig) -> str:
         """ """
@@ -176,7 +183,6 @@ class InMemoryMatrixCredentials(MatrixCredentials):
 
 
 class MatrixReplicationChannel(ReplicationChannel):
-    registration_token = models.CharField(max_length=255, blank=True, null=True)
     homeserver = models.ForeignKey(
         MatrixHomeserver, on_delete=models.CASCADE, related_name="channels"
     )

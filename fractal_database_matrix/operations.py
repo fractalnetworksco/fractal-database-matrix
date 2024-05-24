@@ -433,6 +433,52 @@ class CreateAppsSubSpace(CreateMatrixSubSpace):
         await self.add_subspace(channel, parent_room_id, child_room_id)
 
 
+class CreateServicesSubSpace(CreateMatrixSubSpace):
+    @classmethod
+    def create_durable_operations(cls, instance: ReplicatedModel, channel: ReplicationChannel):
+        from fractal_database.models import DurableOperation
+
+        # create the operation for creating the subspace
+        create_subspace = [
+            DurableOperation.objects.create(
+                instance=instance,
+                module=CreateMatrixSpace.operation_module(),
+                channel=channel,
+                metadata={"name": "Services", "metadata_label": "services_room_id"},
+            )
+        ]
+
+        # create the operation for adding the subspace to the parent space
+        add_subspace_to_parent = DurableOperation.objects.create(
+            instance=instance,
+            module=cls.operation_module(),
+            channel=channel,
+            metadata=instance.operation_metadata_props(),
+        )
+        create_subspace.append(add_subspace_to_parent)
+        return create_subspace
+
+    async def run(self, operation: DurableOperation) -> None:
+        """
+        Adds the apps space as a subspace to the channel's space
+        """
+        # get the channel that this operation is for
+        channel_model = operation.channel_type.model_class()
+        channel: "MatrixReplicationChannel" = await channel_model.objects.select_related(
+            "homeserver"
+        ).aget(
+            pk=operation.channel_id
+        )  # type: ignore
+
+        parent_room_id = channel.room
+        child_room_id = channel.service_space
+        if parent_room_id == child_room_id:
+            raise Exception("Parent and child room IDs cannot be the same")
+
+        # add the apps space to the channel's space
+        await self.add_subspace(channel, parent_room_id, child_room_id)
+
+
 class AcceptDeviceSpaceInvite(MatrixOperation):
     async def run(self, operation: "DurableOperation") -> None:
         """
@@ -727,6 +773,8 @@ class CreateMatrixDatabase(CreateMatrixSpace):
             App.objects.get(pk=instance.database.pk)
         except App.DoesNotExist:
             database_space.extend(CreateAppsSubSpace.create_durable_operations(instance, channel))
+
+        database_space.extend(CreateServicesSubSpace.create_durable_operations(instance, channel))
         return database_space
 
 
@@ -783,7 +831,7 @@ class AddExistingMatrixSubSpace(CreateMatrixSubSpace):
         """
         Creates a Matrix space for the ReplicatedModel "instance" that inherits from this class
         """
-        from fractal_database.models import App
+        from fractal_database.models import App, Service
 
         # get the model the object that this operation is for
         # (this is usually a Replicationchannel model since only Replicationchannels run operations)
@@ -801,14 +849,23 @@ class AddExistingMatrixSubSpace(CreateMatrixSubSpace):
             .aget(pk=operation.channel_id)
         )  # type: ignore
 
-        # check if instance is an App
+        # check if instance is a Service
         # FIXME: Use channel.database_type to figure out which space to add under
         try:
-            await App.objects.aget(pk=instance.database.pk)
-        except App.DoesNotExist:
+            await Service.objects.aget(pk=instance.database.pk)
+        except Service.DoesNotExist:
+            # not a service, so nest it under the database's main space
             parent_room_id = channel.room
         else:
-            parent_room_id = channel.app_space
+            # instance.database is a type of service, so check if instance is an App
+            try:
+                await App.objects.aget(pk=instance.database.pk)
+            except App.DoesNotExist:
+                # not an app, just a service so nest it under the service space
+                parent_room_id = channel.service_space
+            else:
+                # instance is an App, so nest it under the app space
+                parent_room_id = channel.app_space
 
         # pull room ids from metadata
         child_room_id = instance.metadata["room_id"]

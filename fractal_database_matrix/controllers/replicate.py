@@ -81,7 +81,9 @@ class ReplicationController(AuthenticatedController):
         databases = Database.objects.exclude(pk=current_database.pk)
         with transaction.atomic():
             for database in databases:
-                # create a group target for each group that doesn't have one
+                database.set_origin_channel(current_db_matrix_channel)
+
+                # create a matrix channel
                 matrix_channel = database.create_channel(
                     MatrixReplicationChannel,
                     homeserver=homeserver,

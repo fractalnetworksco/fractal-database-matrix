@@ -77,11 +77,14 @@ class MatrixHomeserver(Service):
             else:
                 homeserver = cls.objects.create(name=name, url=url, type=cls.__name__, **ckwargs)
 
-            if gateway:
-                homeserver.gateways.add(gateway)
-
             if not device:
                 device = Device.current_device()
+
+            # add the specified device as a member to the homeserver database
+            device.add_membership(homeserver)
+
+            if gateway:
+                homeserver.gateways.add(gateway)
 
             config = ServiceInstanceConfig.objects.create(
                 service=homeserver,

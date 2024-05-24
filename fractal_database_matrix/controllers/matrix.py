@@ -11,16 +11,6 @@ from .replicate import ReplicationController
 class MatrixController:
     PLUGIN_NAME = "matrix"
 
-    def _generate_registration_token(self):
-        """
-        INSERT INTO registration_tokens VALUES ("pizza",null,0,0,null);
-        ---
-        """
-        pass
-
-    def _launch_server(self):
-        print("Launching Matrix Homeserver")
-
     @use_django
     @cli_method
     def init(self, url: str, *args, **kwargs):
@@ -33,7 +23,7 @@ class MatrixController:
         from fractal_database_matrix.models import MatrixHomeserver
 
         try:
-            current_database = Database.current_db()
+            Database.current_db()
         except Database.DoesNotExist:
             print("Database not found. Get started by creating your database with")
             print("fractal database init")
@@ -55,7 +45,7 @@ class MatrixController:
             local=True,
         )
 
-        # generate a registration token for the homeserver so that devices can be registered
+        # generate a registration token for the homeserver so that their devices can be registered
         registration_token = reg_controller.token("create")
 
         resp = input(
@@ -63,7 +53,7 @@ class MatrixController:
         ).lower()
         if resp == "yes" or resp == "y":
             ReplicationController().to(
-                homeserver.url, registration_token, no_confirm=True, set_as_origin=True
+                homeserver.url, registration_token, confirm=True, set_as_origin=True
             )
         else:
             # TODO: Save the registration token!

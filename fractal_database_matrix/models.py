@@ -135,7 +135,7 @@ class MatrixHomeserver(Service):
         else:
             raise Exception("No service with expose key found in compose file")
 
-        snippet = yaml.safe_load(link.generate_compose_snippet(self.gateways.first(), expose))
+        snippet = yaml.safe_load(link.generate_compose_snippet(gateway, expose))
         compose_file["services"].update(snippet)
         return yaml.dump(compose_file)
 

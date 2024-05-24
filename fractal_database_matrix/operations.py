@@ -221,13 +221,26 @@ class CreateMatrixRoom(MatrixOperation):
 
         channel: "MatrixReplicationChannel" = (
             await operation.channel_type.model_class()
-            .objects.select_related("homeserver")
-            .prefetch_related("homeserver__credentials")
+            .objects.select_related("homeserver", "database")
+            .prefetch_related(
+                "homeserver__credentials",
+                "database__device_memberships__device__matrixcredentials_set",
+            )
             .aget(pk=operation.channel_id)
         )  # type: ignore
 
         # FIXME: only invite credentials (devices) that the user owns
-        matrix_ids_to_invite = [cred.matrix_id for cred in channel.homeserver.credentials.all()]
+        # memberships = channel.database.device_memberships.all()
+
+        # matrix_ids_to_invite = []
+        # for membership in memberships:
+        #     for creds in membership.device.matrixcredentials_set.filter(
+        #         homeserver=channel.homeserver
+        #     ):
+        #         matrix_ids_to_invite.append(creds.matrix_id)
+
+        matrix_ids_to_invite = [creds.matrix_id for creds in channel.homeserver.credentials.all()]
+
         room_id = await self.create_room(
             channel=channel,
             name=name,

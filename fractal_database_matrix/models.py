@@ -21,7 +21,7 @@ from fractal_database_matrix.broker.broker import FractalMatrixBroker
 from taskiq import SendTaskError
 
 if TYPE_CHECKING:
-    from fractal.gateway.models import Gateway
+    from fractal.gateway.models import Gateway, Link
 
     from .models import MatrixCredentials
 
@@ -115,7 +115,11 @@ class MatrixHomeserver(Service):
             )
             return yaml.dump(compose_file)
 
-        link = app_config.links.first()
+        gateway = self.gateways.first()
+        if not gateway:
+            raise Exception("No gateway found for MatrixHomeserver %s" % self)
+
+        link: Optional["Link"] = app_config.links.first()  # type: ignore
         if not link:
             logger.warning(
                 "Matrix Homeserver %s ServiceInstanceConfig does not have any links or gateways. Your Matrix Homeserver will only work locally."
@@ -130,10 +134,6 @@ class MatrixHomeserver(Service):
                 break
         else:
             raise Exception("No service with expose key found in compose file")
-
-        gateway = self.gateways.first()
-        if not gateway:
-            raise Exception("No gateway found for MatrixHomeserver %s" % self)
 
         snippet = yaml.safe_load(link.generate_compose_snippet(self.gateways.first(), expose))
         compose_file["services"].update(snippet)

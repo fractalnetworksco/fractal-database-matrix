@@ -230,16 +230,14 @@ class CreateMatrixRoom(MatrixOperation):
         )  # type: ignore
 
         # FIXME: only invite credentials (devices) that the user owns
-        # memberships = channel.database.device_memberships.all()
+        memberships = channel.database.device_memberships.all()
 
-        # matrix_ids_to_invite = []
-        # for membership in memberships:
-        #     for creds in membership.device.matrixcredentials_set.filter(
-        #         homeserver=channel.homeserver
-        #     ):
-        #         matrix_ids_to_invite.append(creds.matrix_id)
-
-        matrix_ids_to_invite = [creds.matrix_id for creds in channel.homeserver.credentials.all()]
+        matrix_ids_to_invite = []
+        async for membership in memberships:
+            async for creds in membership.device.matrixcredentials_set.filter(
+                homeserver=channel.homeserver
+            ):
+                matrix_ids_to_invite.append(creds.matrix_id)
 
         room_id = await self.create_room(
             channel=channel,
@@ -250,8 +248,11 @@ class CreateMatrixRoom(MatrixOperation):
         )
 
         # FIXME: Should be its own operation
-        for account in channel.homeserver.credentials.all():
-            await self.accept_invite_as_device(account, room_id, channel.homeserver.url)
+        async for membership in memberships:
+            async for account in membership.device.matrixcredentials_set.filter(
+                homeserver=channel.homeserver
+            ):
+                await self.accept_invite_as_device(account, room_id, channel.homeserver.url)
 
         logger.info("Successfully created Matrix Room for %s" % name)
         return {metadata_label: room_id}

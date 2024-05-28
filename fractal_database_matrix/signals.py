@@ -38,7 +38,13 @@ def create_replication_channel_for_new_matrix_homeserver(
     # we need to reload it to get the latest state
     homeserver = sender.objects.get(pk=instance.pk)
 
-    current_db = Database.current_db()
+    try:
+        current_db = Database.current_db()
+    except Database.DoesNotExist:
+        logger.warning(
+            "No current database found. Skipping creation of Matrix replication channel."
+        )
+        return
 
     if not current_db.origin_channel():
         # create the channel and set it as the origin channel

@@ -20,6 +20,8 @@ from fractal_database.models import (
 from fractal_database_matrix.broker.broker import FractalMatrixBroker
 from taskiq import SendTaskError
 
+from .exceptions import MatrixHomeserverAlreadyExists
+
 if TYPE_CHECKING:
     from fractal.gateway.models import Gateway, Link
 
@@ -58,24 +60,33 @@ class MatrixHomeserver(Service):
             from fractal.gateway.models import Gateway
         except ImportError:
             logger.warning(
-                "Gateway model not found. Your homeserver will only be accessible locally"
+                "Gateway model not found. Your Matrix Homeserver will only be accessible locally"
             )
         else:
             # FIXME: handle multiple gateways
             gateway = Gateway.objects.first()
             if not gateway:
-                raise Exception("No gateway found for MatrixHomeserver %s" % homeserver)
-            link = gateway.create_link(url, override_link=True)
-
-        with transaction.atomic():
-            if "localhost" in url:
-                # since links created that have .localhost wont resolve
-                # on the nio.MatrixClient, replace it with the local url
-                homeserver = cls.objects.create(
-                    name=name, url=cls.SYNAPSE_LOCAL, type=cls.__name__, **ckwargs
+                logger.warning(
+                    "No Gateway found. Your Matrix Homeserver will only be accessible locally"
                 )
             else:
-                homeserver = cls.objects.create(name=name, url=url, type=cls.__name__, **ckwargs)
+                link = gateway.create_link(url, override_link=True)
+
+        # if the url has localhost in it, use the cls.SYNAPSE_LOCAL since links
+        # for localhost wont have a valid cert which doesn't work with the FractaLMatrixClient
+        if "localhost" in url:
+            url = cls.SYNAPSE_LOCAL
+
+        # ensure that the homeserver doesn't already exist
+        try:
+            cls.objects.get(url=url)
+        except cls.DoesNotExist:
+            pass
+        else:
+            raise MatrixHomeserverAlreadyExists(url)
+
+        with transaction.atomic():
+            homeserver = cls.objects.create(name=name, url=url, type=cls.__name__, **ckwargs)
 
             if not device:
                 device = Device.current_device()
@@ -102,24 +113,20 @@ class MatrixHomeserver(Service):
         )
         return homeserver
 
-    def _render_compose_file(self, app_config: ServiceInstanceConfig) -> str:
+    def _render_compose_file(self) -> str:
         """ """
+        # FIXME: handle multiple links
+        if not hasattr(self.config, "links") or not hasattr(self, "gateways"):
+            raise Exception("No links or gateways found for MatrixHomeserver %s" % self)
+
         with open(f"{self.SYNAPSE_COMPOSE_FILE_PATH}/docker-compose.yml") as f:
             compose_file = yaml.safe_load(f)
-
-        # FIXME: handle multiple links
-        if not hasattr(app_config, "links") or not hasattr(self, "gateways"):
-            logger.warning(
-                "Matrix Homeserver %s ServiceInstanceConfig does not have any links or gateways. Your Matrix Homeserver will only work locally."
-                % self
-            )
-            return yaml.dump(compose_file)
 
         gateway = self.gateways.first()
         if not gateway:
             raise Exception("No gateway found for MatrixHomeserver %s" % self)
 
-        link: Optional["Link"] = app_config.links.first()  # type: ignore
+        link: Optional["Link"] = self.config.links.first()  # type: ignore
         if not link:
             logger.warning(
                 "Matrix Homeserver %s ServiceInstanceConfig does not have any links or gateways. Your Matrix Homeserver will only work locally."

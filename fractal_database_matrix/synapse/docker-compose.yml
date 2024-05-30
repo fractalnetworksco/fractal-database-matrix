@@ -8,6 +8,8 @@ services:
       args:
         SYNAPSE_SERVER_NAME: "localhost"
         SYNAPSE_REPORT_STATS: "no"
+    volumes:
+      - synapse-db:/data
     # ports:
     #   - 8008:8008
     healthcheck:
@@ -40,3 +42,6 @@ services:
       MATRIX_SERVER_NAME: localhost
       MATRIX_INTERNAL_SERVER_URI: synapse:8008
       MATRIX_SERVER_FQDN: http://localhost:8008
+
+volumes:
+  synapse-db:

@@ -766,7 +766,7 @@ class CreateMatrixDatabase(CreateMatrixSpace):
         """
         Create the operations (tasks) for creating a Database in Matrix.
         """
-        from fractal_database.models import App
+        from fractal_database.models import App, Service
 
         # create the operations for creating the the Database Space itself
         database_space = CreateMatrixSpace.create_durable_operations(instance, channel)
@@ -785,10 +785,19 @@ class CreateMatrixDatabase(CreateMatrixSpace):
 
         try:
             App.objects.get(pk=instance.database.pk)
+            database_space.extend(
+                CreateServicesSubSpace.create_durable_operations(instance, channel)
+            )
         except App.DoesNotExist:
             database_space.extend(CreateAppsSubSpace.create_durable_operations(instance, channel))
 
-        database_space.extend(CreateServicesSubSpace.create_durable_operations(instance, channel))
+        try:
+            Service.objects.get(pk=instance.database.pk)
+        except Service.DoesNotExist:
+            database_space.extend(
+                CreateServicesSubSpace.create_durable_operations(instance, channel)
+            )
+
         return database_space
 
 

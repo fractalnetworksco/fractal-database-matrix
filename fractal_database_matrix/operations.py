@@ -216,7 +216,7 @@ class CreateMatrixRoom(MatrixOperation):
             name = operation.metadata["name"]
             public = operation.metadata.get("public", False)
             metadata_label = operation.metadata.get("metadata_label", "room_id")
-        except KeyError:
+        except KeyError as err:
             raise Exception("name must be specified in metadata")
 
         channel: "MatrixReplicationChannel" = (
@@ -228,6 +228,11 @@ class CreateMatrixRoom(MatrixOperation):
             )
             .aget(pk=operation.channel_id)
         )  # type: ignore
+
+        # if the room already exists, return the room id
+        # we don't want to overwrite the room id if it already exists
+        if operation.instance.metadata.get(metadata_label):
+            return {}
 
         # FIXME: only invite credentials (devices) that the user owns
         memberships = channel.database.device_memberships.all()
@@ -274,6 +279,11 @@ class CreateMatrixSpace(MatrixOperation):
             .objects.select_related("database", "homeserver")
             .aget(pk=operation.channel_id)
         )  # type: ignore
+
+        # if the room already exists, return the room id
+        # we don't want to overwrite the room id if it already exists
+        if operation.instance.metadata.get(metadata_label):
+            return {}
 
         logger.info("Creating Matrix space for %s on channel %s" % (name, channel))
 
@@ -447,6 +457,93 @@ class CreateAppsSubSpace(CreateMatrixSubSpace):
         await self.add_subspace(channel, parent_room_id, child_room_id)
 
 
+class InviteDeviceToSpace(MatrixOperation):
+    async def run(self, operation: "DurableOperation") -> None:
+        """
+        Sends an invite to the device in the instance (DeviceMembership) to the
+        devices subspace on the associated channel.
+        """
+        try:
+            metadata_label = operation.metadata["metadata_label"]
+        except KeyError:
+            raise Exception("metadata_label must be specified in metadata")
+
+        model_class = operation.content_type.model_class()  # type: ignore
+        membership: "DeviceMembership" = await model_class.objects.select_related("device").aget(
+            pk=operation.object_id
+        )  # type: ignore
+
+        # fetch channel in order to get credentials of users to invite to the apps subspace
+        channel: "MatrixReplicationChannel" = (
+            await operation.channel_type.model_class()
+            .objects.select_related("homeserver")
+            .prefetch_related("homeserver__credentials")
+            .aget(pk=operation.channel_id)
+        )  # type: ignore
+
+        device_creds: Optional["MatrixCredentials"] = await channel.homeserver.credentials.filter(
+            device=membership.device
+        ).afirst()
+        if not device_creds:
+            raise Exception(f"Failed to find device credentials for {membership.device}")
+
+        try:
+            room_id = channel.metadata[metadata_label]
+        except KeyError:
+            raise Exception(f"Failed to find room id in channel metadata for {metadata_label}")
+
+        try:
+            await self.invite_device(device_creds.matrix_id, room_id)
+        except Exception as e:
+            # if the device is already in the room, no need to accept the invite
+            if "is already in the room" in str(e):
+                return None
+            raise e
+
+        return None
+
+
+class AcceptSpaceInvite(MatrixOperation):
+    async def run(self, operation: "DurableOperation") -> None:
+        """
+        Accepts an invite to the devices subspace on the associated channel.
+        """
+        try:
+            metadata_label = operation.metadata["metadata_label"]
+        except KeyError:
+            raise Exception("metadata_label must be specified in metadata")
+
+        model_class = operation.content_type.model_class()  # type: ignore
+        membership: "DeviceMembership" = await model_class.objects.select_related("device").aget(
+            pk=operation.object_id
+        )  # type: ignore
+
+        # fetch channel in order to get credentials of users to invite to the apps subspace
+        channel: "MatrixReplicationChannel" = (
+            await operation.channel_type.model_class()
+            .objects.select_related("homeserver")
+            .prefetch_related("homeserver__credentials")
+            .aget(pk=operation.channel_id)
+        )  # type: ignore
+
+        try:
+            room_id = channel.metadata[metadata_label]
+        except KeyError:
+            raise Exception(f"Failed to find room id in channel metadata for {metadata_label}")
+
+        device_creds = await channel.homeserver.credentials.filter(
+            device=membership.device
+        ).afirst()
+        if not device_creds:
+            raise Exception(f"Failed to find device credentials for {membership.device}")
+
+        # accept invite on behalf of device
+        await self.accept_invite_as_device(device_creds, room_id, channel.homeserver.url)
+        logger.info("Device has successfully joined space %s for channel %s" % (room_id, channel))
+
+        return None
+
+
 class CreateServicesSubSpace(CreateMatrixSubSpace):
     @classmethod
     def create_durable_operations(cls, instance: ReplicatedModel, channel: ReplicationChannel):
@@ -463,13 +560,39 @@ class CreateServicesSubSpace(CreateMatrixSubSpace):
         ]
 
         # create the operation for adding the subspace to the parent space
-        add_subspace_to_parent = DurableOperation.objects.create(
-            instance=instance,
-            module=cls.operation_module(),
-            channel=channel,
-            metadata=instance.operation_metadata_props(),
+        create_subspace.append(
+            DurableOperation.objects.create(
+                instance=instance,
+                module=cls.operation_module(),
+                channel=channel,
+                metadata=instance.operation_metadata_props(),
+            )
         )
-        create_subspace.append(add_subspace_to_parent)
+
+        device_memberships = channel.database.device_memberships.all()
+        for membership in device_memberships:
+            create_subspace.append(
+                DurableOperation.objects.create(
+                    instance=membership,
+                    module=InviteDeviceToSpace.operation_module(),
+                    channel=channel,
+                    metadata={
+                        "metadata_label": "services_room_id",
+                        **membership.operation_metadata_props(),
+                    },
+                )
+            )
+            create_subspace.append(
+                DurableOperation.objects.create(
+                    instance=membership,
+                    module=AcceptSpaceInvite.operation_module(),
+                    channel=channel,
+                    metadata={
+                        "metadata_label": "services_room_id",
+                        **membership.operation_metadata_props(),
+                    },
+                )
+            )
         return create_subspace
 
     async def run(self, operation: DurableOperation) -> None:

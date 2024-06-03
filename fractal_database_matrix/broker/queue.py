@@ -32,17 +32,21 @@ class ReplicationQueue(BroadcastQueue):
         for item in fixture:
             model = item["model"]
             pk = item["pk"]
-            version = item["fields"]["object_version"]
+            version = item["fields"].get("object_version")
 
             # create a unique key for each object
             key = (model, pk)
 
-            # update the dictionary only if this version is higher than what's already recorded
-            if (
-                key not in latest_versions
-                or latest_versions[key]["fields"]["object_version"] < version
-            ):
+            if version is None:
+                # if the object doesn't have a version, dont prune it
                 latest_versions[key] = item
+            else:
+                # update the dictionary only if this version is higher than what's already recorded
+                if (
+                    key not in latest_versions
+                    or latest_versions[key]["fields"]["object_version"] < version
+                ):
+                    latest_versions[key] = item
 
         # extract the values to get the pruned list of objects
         return list(latest_versions.values())

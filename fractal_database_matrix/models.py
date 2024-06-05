@@ -292,7 +292,7 @@ class MatrixReplicationChannel(ReplicationChannel):
 
         try:
             await replicate_fixture.kicker().with_broker(broker).with_labels(room_id=room_id).kiq(
-                replication_event
+                replication_event, room_id
             )
         except SendTaskError as e:
             raise Exception(e.__cause__)

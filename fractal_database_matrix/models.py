@@ -19,6 +19,8 @@ from fractal_database.models import (
 )
 from fractal_database_matrix.broker.broker import FractalMatrixBroker
 from taskiq import SendTaskError
+from taskiq.middlewares.retry_middleware import SimpleRetryMiddleware
+from taskiq_matrix.matrix_result_backend import MatrixResultBackend
 
 from .exceptions import MatrixHomeserverAlreadyExists
 
@@ -237,7 +239,8 @@ class MatrixReplicationChannel(ReplicationChannel):
         durable_operations.extend(operation.create_durable_operations(instance, self))
 
         if isinstance(instance, ReplicationChannel):
-            db_origin = instance.database.origin_channel()
+            database_type = self._get_database_type()
+            db_origin = database_type.origin_channel()
             # if this channel is not the origin channel for the db,
             # then nest it under the origin channel
             if db_origin and self != db_origin:
@@ -252,7 +255,7 @@ class MatrixReplicationChannel(ReplicationChannel):
 
         return durable_operations
 
-    async def push_replication_log(self, fixture: List[Dict[str, Any]]) -> None:
+    async def push_replication_log(self, fixture: Dict[str, Any]) -> None:
         """
         Pushes a replication log to the replication self as a replicate. Uses taskiq
         to "kick" a replication task that all devices in the object's
@@ -281,21 +284,50 @@ class MatrixReplicationChannel(ReplicationChannel):
         )
 
         try:
+            await self.kick_task(replicate_fixture, replication_event, room_id)
+        except SendTaskError as e:
+            raise Exception(e.__cause__)
+
+    async def kick_task(self, task_func, *targs, task_labels: Optional[dict] = None, **tkwargs):
+        if not task_labels:
+            task_labels = {}
+
+        # ensure that the homeserver is fetched FIXME
+        await sync_to_async(lambda: self.homeserver)()
+
+        try:
             creds = await self.aget_creds()
         except Exception as e:
             raise Exception(f"Cannot push replication log: {e}")
 
-        broker = FractalMatrixBroker().with_matrix_config(
-            homeserver_url=self.homeserver.url,
-            access_token=creds.access_token,
+        broker = (
+            FractalMatrixBroker()
+            .with_matrix_config(
+                homeserver_url=self.homeserver.url,
+                access_token=creds.access_token,
+            )
+            .with_result_backend(
+                MatrixResultBackend(
+                    homeserver_url=self.homeserver.url,
+                    access_token=creds.access_token,
+                    result_ex_time=3600,
+                )
+            )
+            .with_middlewares(SimpleRetryMiddleware(default_retry_count=3))
         )
 
-        try:
-            await replicate_fixture.kicker().with_broker(broker).with_labels(room_id=room_id).kiq(
-                replication_event, room_id
-            )
-        except SendTaskError as e:
-            raise Exception(e.__cause__)
+        if "room_id" not in task_labels:
+            task_labels["room_id"] = self.device_space
+
+        room_id = task_labels["room_id"]
+
+        logger.info("Kicking task %s to room %s" % (task_func, room_id))
+        return (
+            await task_func.kicker()
+            .with_broker(broker)
+            .with_labels(**task_labels)
+            .kiq(*targs, **tkwargs)
+        )
 
     def get_operation_module(self) -> str:
         return "fractal_database_matrix.operations.CreateMatrixDatabase"

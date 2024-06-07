@@ -24,7 +24,8 @@ class ReplicationQueue(BroadcastQueue):
         super().__init__(self.name, homeserver_url, access_token, *args, **kwargs)
         self.checkpoint.type = f"{self.checkpoint.type}.{self.device_name}"
 
-    def prune_old_objects(self, fixture: List[dict]) -> List[dict]:
+    def prune_old_objects(self, replication_event: dict) -> dict:
+        fixture = replication_event["payload"]
         # dictionary to store the latest version of each object
         latest_versions = {}
 
@@ -49,7 +50,8 @@ class ReplicationQueue(BroadcastQueue):
                     latest_versions[key] = item
 
         # extract the values to get the pruned list of objects
-        return list(latest_versions.values())
+        replication_event["payload"] = list(latest_versions.values())
+        return replication_event
 
     async def get_unacked_tasks(
         self, timeout: int = 30000, exclude_self: bool = True
@@ -62,8 +64,8 @@ class ReplicationQueue(BroadcastQueue):
             if task_name != "fractal_database.replication.tasks:replicate_fixture":
                 continue
 
-            fixture = json.loads(task.data["args"][0])
-            task.data["args"][0] = json.dumps(self.prune_old_objects(fixture))
+            replication_event = json.loads(task.data["args"][0])
+            task.data["args"][0] = json.dumps(self.prune_old_objects(replication_event))
 
         return self.name, unacked_tasks
 

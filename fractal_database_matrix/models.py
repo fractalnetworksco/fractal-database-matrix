@@ -3,7 +3,9 @@ import logging
 import subprocess
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+import docker
 import fractal_database_matrix
+import tldextract
 import yaml
 from asgiref.sync import sync_to_async
 from django.db import models, transaction
@@ -16,6 +18,7 @@ from fractal_database.models import (
     ReplicationChannel,
     Service,
     ServiceInstanceConfig,
+    docker_compose,
 )
 from fractal_database_matrix.broker.broker import FractalMatrixBroker
 from taskiq import SendTaskError
@@ -57,14 +60,25 @@ class MatrixHomeserver(Service):
 
         gateway = None
         link = None
+        if not device:
+            device = Device.current_device()
+
+        url = tldextract.extract(url)
+        # registered_domains have the domain + suffix joined together.
+        # some domains like localhost don't have a registered domain (dont have a suffix)
+        # so if registered_domain is "" then use the domain
+        domain = url.registered_domain or url.domain
+        subdomain = url.subdomain
+
         # only attempt to create a link if the current database has the gateways attribute
         try:
-            from fractal.gateway.models import Gateway
+            from fractal.gateway.models import Domain, Gateway
         except ImportError:
             logger.warning(
                 "Gateway model not found. Your Matrix Homeserver will only be accessible locally"
             )
         else:
+
             # FIXME: handle multiple gateways
             gateway = Gateway.objects.first()
             if not gateway:
@@ -72,12 +86,18 @@ class MatrixHomeserver(Service):
                     "No Gateway found. Your Matrix Homeserver will only be accessible locally"
                 )
             else:
-                link = gateway.create_link(url, override_link=True)
+                try:
+                    domain = gateway.get_domain(domain)
+                except Domain.DoesNotExist:
+                    raise Exception("Domain %s not found" % domain)
+
+                link = gateway.create_link(domain, subdomain, override_link=True)
+                fqdn = link.fqdn
 
         # if the url has localhost in it, use the cls.SYNAPSE_LOCAL since links
         # for localhost wont have a valid cert which doesn't work with the FractaLMatrixClient
-        if "localhost" in url:
-            url = cls.SYNAPSE_LOCAL
+        if "localhost" in url.domain:
+            fqdn = cls.SYNAPSE_LOCAL
 
         # ensure that the homeserver doesn't already exist
         try:
@@ -85,13 +105,10 @@ class MatrixHomeserver(Service):
         except cls.DoesNotExist:
             pass
         else:
-            raise MatrixHomeserverAlreadyExists(url)
+            raise MatrixHomeserverAlreadyExists(fqdn)
 
         with transaction.atomic():
-            homeserver = cls.objects.create(name=name, url=url, type=cls.__name__, **ckwargs)
-
-            if not device:
-                device = Device.current_device()
+            homeserver = cls.objects.create(name=name, url=fqdn, type=cls.__name__, **ckwargs)
 
             # add the specified device as a member to the homeserver database
             device.add_membership(homeserver)
@@ -115,8 +132,13 @@ class MatrixHomeserver(Service):
         )
         return homeserver
 
+    def _build_images(self) -> None:
+        docker_compose("build", _cwd=self.SYNAPSE_COMPOSE_FILE_PATH)
+
     def _render_compose_file(self) -> str:
         """ """
+        self._build_images()
+
         # FIXME: handle multiple links
         if not hasattr(self.config, "links") or not hasattr(self, "gateways"):
             raise Exception("No links or gateways found for MatrixHomeserver %s" % self)
@@ -135,6 +157,9 @@ class MatrixHomeserver(Service):
                 % self
             )
             return yaml.dump(compose_file)
+
+        # TODO: handle passing an environment file that contains any
+        # environment variables set on the config
 
         for service in compose_file["services"]:
             if "expose" in compose_file["services"][service]:
@@ -321,7 +346,7 @@ class MatrixReplicationChannel(ReplicationChannel):
 
         room_id = task_labels["room_id"]
 
-        logger.info("Kicking task %s to room %s" % (task_func, room_id))
+        logger.debug("Kicking task %s to room %s" % (task_func, room_id))
         return (
             await task_func.kicker()
             .with_broker(broker)

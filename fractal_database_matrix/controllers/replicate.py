@@ -56,6 +56,7 @@ class ReplicationController(AuthenticatedController):
                 type=MatrixHomeserver.__name__,
                 registration_token=registration_token,
             )
+            current_device.add_membership(homeserver)
 
         # now that the user is logged into a matrix server, ensure that the current device is owned
         # by the user

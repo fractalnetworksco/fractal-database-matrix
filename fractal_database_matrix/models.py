@@ -226,9 +226,9 @@ class MatrixReplicationChannel(ReplicationChannel):
 
     def __str__(self):
         if self.metadata.get("room_id"):
-            return f"{self.name} ({self.metadata['room_id']} - MatrixReplicationTarget)"
+            return f"{self.name} ({self.metadata['room_id']} - MatrixReplicationChannel)"
         else:
-            return f"{self.name} (MatrixReplicationTarget)"
+            return f"{self.name} (MatrixReplicationChannel)"
 
     def get_creds(self) -> MatrixCredentials | InMemoryMatrixCredentials:
         return Device.current_device().get_creds(self.homeserver)

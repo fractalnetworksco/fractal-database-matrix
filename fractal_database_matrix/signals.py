@@ -7,6 +7,7 @@ from django.dispatch import receiver
 from fractal.cli.controllers.auth import AuthenticatedController
 
 if TYPE_CHECKING:
+    from fractal_database.models import Database
     from fractal_database_matrix.models import MatrixHomeserver
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,30 @@ def create_replication_channel_for_new_matrix_homeserver(
     else:
         # simply creating a new channel for the homeserver
         channel = current_db.create_channel(
+            MatrixReplicationChannel,
+            homeserver=homeserver,
+            source=True,
+            target=True,
+        )
+
+
+def create_matrix_replication_target_for_new_database(
+    sender: "Database", instance: "Database", created: bool, raw: bool, **kwargs
+):
+    from fractal_database_matrix.models import (
+        MatrixHomeserver,
+        MatrixReplicationChannel,
+    )
+
+    if not created or raw:
+        return
+
+    homeservers = MatrixHomeserver.objects.all()
+    if not homeservers:
+        return
+
+    for homeserver in homeservers:
+        instance.create_channel(
             MatrixReplicationChannel,
             homeserver=homeserver,
             source=True,

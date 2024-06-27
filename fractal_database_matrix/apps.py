@@ -15,6 +15,10 @@ class FractalDatabaseMatrixConfig(AppConfig):
 
         subclasses = Database.get_subclasses()
 
+        # connect signal to create matrix replication target for new databases
+        models.signals.post_save.connect(
+            create_matrix_replication_target_for_new_database, sender=Database
+        )
         for subclass in subclasses:
             models.signals.post_save.connect(
                 create_matrix_replication_target_for_new_database, sender=subclass

@@ -6,25 +6,25 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from fractal.cli.controllers.auth import AuthenticatedController
 
+from .models import MatrixHomeserver, MatrixReplicationChannel
+
 if TYPE_CHECKING:
     from fractal_database.models import Database
-    from fractal_database_matrix.models import MatrixHomeserver
 
 logger = logging.getLogger(__name__)
 
 
-@receiver(post_save, sender="fractal_database_matrix.MatrixHomeserver")
+@receiver(post_save, sender=MatrixHomeserver)
 def create_replication_channel_for_new_matrix_homeserver(
     sender: type["MatrixHomeserver"],
     instance: "MatrixHomeserver",
     created: bool,
     raw: bool,
-    **kwargs
+    **kwargs,
 ):
-    from fractal_database.models import Database, Device
-    from fractal_database_matrix.models import MatrixReplicationChannel
+    from fractal_database.models import Database, Device, LocalReplicationChannel
 
-    if not created or not raw:
+    if not created or raw:
         return
 
     if not transaction.get_connection().in_atomic_block:
@@ -67,15 +67,14 @@ def create_replication_channel_for_new_matrix_homeserver(
             target=True,
         )
 
+    # replay the logs from the local channel onto the new channel (this will replicate everything to the new channel)
+    local_channel = LocalReplicationChannel.objects.get(database=current_db)
+    channel.replay_replication_logs_from(local_channel)
+
 
 def create_matrix_replication_target_for_new_database(
     sender: "Database", instance: "Database", created: bool, raw: bool, **kwargs
 ):
-    from fractal_database_matrix.models import (
-        MatrixHomeserver,
-        MatrixReplicationChannel,
-    )
-
     if not created or raw:
         return
 

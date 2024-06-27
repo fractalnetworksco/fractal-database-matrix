@@ -49,12 +49,20 @@ class ReplicationController(AuthenticatedController):
 
         try:
             homeserver = MatrixHomeserver.objects.get(url=homeserver_url)
+            print("Already replicating to this homeserver")
+            exit(0)
         except MatrixHomeserver.DoesNotExist:
+            pass
+
+        with transaction.atomic():
+            # create the homeserver
+            # post save on this will create the matrixreplicationchannel for the current database
             homeserver = MatrixHomeserver.objects.create(
                 name="Synapse",
                 url=homeserver_url,
                 type=MatrixHomeserver.__name__,
                 registration_token=registration_token,
+                parent_db=current_database,
             )
             current_device.add_membership(homeserver)
 
@@ -64,20 +72,9 @@ class ReplicationController(AuthenticatedController):
             current_device.owner_matrix_id = self.matrix_id
             current_device.save()
 
-        # create the matrix replication channel for the current database
-        # NOTE: this needs to happen first before we go and create the group channels since
-        # their representations may depend on the current database having its first matrix channel
-        with transaction.atomic():
-            current_db_matrix_channel = current_database.create_channel(
-                MatrixReplicationChannel,
-                set_as_origin=set_as_origin,
-                homeserver=homeserver,
-                source=True,
-                target=True,
-            )
-            local_channel = LocalReplicationChannel.objects.get(database=current_database)
-            current_db_matrix_channel.replay_replication_logs_from(local_channel)
-
+        current_db_matrix_channel = MatrixReplicationChannel.objects.get(
+            homeserver=homeserver, database=current_database
+        )
         # fetch all of the groups (excluding the current database since it already has a primary target)
         databases = Database.objects.exclude(pk=current_database.pk)
         with transaction.atomic():

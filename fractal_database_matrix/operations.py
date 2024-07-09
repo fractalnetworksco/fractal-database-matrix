@@ -271,6 +271,7 @@ class CreateMatrixSpace(MatrixOperation):
         try:
             name = operation.metadata["name"]
             metadata_label = operation.metadata.get("metadata_label", "room_id")
+            extra_state = operation.metadata.get("extra_state")
         except KeyError:
             raise Exception("name must be specified in metadata")
 
@@ -294,6 +295,10 @@ class CreateMatrixSpace(MatrixOperation):
             },
             {"type": "f.database.channel", "content": {}},
         ]
+
+        if extra_state is not None:
+            initial_state.append(extra_state)
+
         room_id = await self.create_room(
             channel=channel,
             name=name,
@@ -370,13 +375,20 @@ class CreateDevicesSubSpace(CreateMatrixSubSpace):
     def create_durable_operations(cls, instance: ReplicatedModel, channel: ReplicationChannel):
         from fractal_database.models import DurableOperation
 
+        metadata = {
+            "name": "Devices",
+            "metadata_label": "devices_room_id",
+        }
+        if channel.database.parent_db is None:
+            metadata["extra_state"] = {"type": "f.database.root", "content": {}}
+
         # create the operation for the creating the subspace
         create_subspace = [
             DurableOperation.objects.create(
                 instance=instance,
                 module=CreateMatrixSpace.operation_module(),
                 channel=channel,
-                metadata={"name": "Devices", "metadata_label": "devices_room_id"},
+                metadata=metadata,
             )
         ]
 

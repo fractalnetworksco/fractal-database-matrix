@@ -49,28 +49,29 @@ class ReplicationController(AuthenticatedController):
 
         try:
             homeserver = MatrixHomeserver.objects.get(url=homeserver_url)
-            print("Already replicating to this homeserver")
-            exit(0)
         except MatrixHomeserver.DoesNotExist:
-            pass
-
-        with transaction.atomic():
-            # create the homeserver
-            # post save on this will create the matrixreplicationchannel for the current database
-            homeserver = MatrixHomeserver.objects.create(
-                name="Synapse",
-                url=homeserver_url,
-                type=MatrixHomeserver.__name__,
-                registration_token=registration_token,
-                parent_db=current_database,
-            )
-            current_device.add_membership(homeserver)
+            with transaction.atomic():
+                # create the homeserver
+                # post save on this will create the matrixreplicationchannel for the current database
+                homeserver = MatrixHomeserver.objects.create(
+                    name=f"Synapse@{homeserver_url}",
+                    url=homeserver_url,
+                    type=MatrixHomeserver.__name__,
+                    registration_token=registration_token,
+                    parent_db=current_database,
+                )
+                current_device.add_membership(homeserver)
+        else:
+            # add membership to the homeserver
+            if not current_device.has_membership(homeserver):
+                current_device.add_membership(homeserver)
 
         # now that the user is logged into a matrix server, ensure that the current device is owned
         # by the user
         if not current_device.owner_matrix_id:
-            current_device.owner_matrix_id = self.matrix_id
-            current_device.save()
+            current_device.update(owner_matrix_id=self.matrix_id)
+            # current_device.owner_matrix_id = self.matrix_id
+            # current_device.save()
 
         current_db_matrix_channel = MatrixReplicationChannel.objects.get(
             homeserver=homeserver, database=current_database
@@ -81,23 +82,26 @@ class ReplicationController(AuthenticatedController):
             for database in databases:
                 database.set_origin_channel(current_db_matrix_channel)
 
-                # create a matrix channel
-                matrix_channel = database.create_channel(
-                    MatrixReplicationChannel,
-                    homeserver=homeserver,
-                    source=True,
-                    target=True,
-                )
+                if not MatrixReplicationChannel.objects.filter(
+                    homeserver=homeserver, database=database, source=True, target=True
+                ).exists():
+                    # create a matrix channel
+                    matrix_channel = database.create_channel(
+                        MatrixReplicationChannel,
+                        homeserver=homeserver,
+                        source=True,
+                        target=True,
+                    )
 
-                # attempt to fetch the dummy target for the group
-                try:
-                    local_channel = LocalReplicationChannel.objects.get(database=database)
-                except LocalReplicationChannel.DoesNotExist:
-                    pass
-                else:
-                    # replay the replication logs from the dummy target
-                    # this replicates any existing data in the group to the new target
-                    matrix_channel.replay_replication_logs_from(local_channel)
+                    # attempt to fetch the dummy target for the group
+                    try:
+                        local_channel = LocalReplicationChannel.objects.get(database=database)
+                    except LocalReplicationChannel.DoesNotExist:
+                        pass
+                    else:
+                        # replay the replication logs from the dummy target
+                        # this replicates any existing data in the group to the new target
+                        matrix_channel.replay_replication_logs_from(local_channel)
 
 
 Controller = ReplicationController

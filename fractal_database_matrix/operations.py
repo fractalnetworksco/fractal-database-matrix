@@ -296,7 +296,10 @@ class CreateMatrixSpace(MatrixOperation):
             {"type": "f.database.channel", "content": {}},
         ]
 
-        if channel.database.parent_db is None:
+        # FIXME: The Devices subspace is where all of the data is replciated to.
+        # figure out a better way than just expecitng the Devices room to be
+        # named "devices".
+        if channel.database.parent_db is None and name.lower() == "devices":
             initial_state.append({"type": "f.database.root", "content": {}})
 
         if isinstance(extra_state, dict):

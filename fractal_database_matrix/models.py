@@ -46,7 +46,7 @@ class MatrixHomeserver(Service):
     credentials: models.QuerySet["MatrixCredentials"]
     gateways: models.QuerySet["Gateway"]
 
-    url = models.URLField()
+    url = models.URLField(unique=True)
     priority = models.PositiveIntegerField(default=0, blank=True, null=True)
     registration_token = models.CharField(max_length=255, blank=True, null=True)
 

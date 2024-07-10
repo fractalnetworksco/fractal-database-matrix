@@ -52,7 +52,6 @@ class ReplicationController(AuthenticatedController):
         except MatrixHomeserver.DoesNotExist:
             with transaction.atomic():
                 # create the homeserver
-                # post save on this will create the matrixreplicationchannel for the current database
                 homeserver = MatrixHomeserver.objects.create(
                     name=f"Synapse@{homeserver_url}",
                     url=homeserver_url,
@@ -73,9 +72,16 @@ class ReplicationController(AuthenticatedController):
             # current_device.owner_matrix_id = self.matrix_id
             # current_device.save()
 
-        current_db_matrix_channel = MatrixReplicationChannel.objects.get(
-            homeserver=homeserver, database=current_database
-        )
+        # create the matrix channel for the homeserver if it doesn't exist
+        try:
+            current_db_matrix_channel = MatrixReplicationChannel.objects.get(
+                homeserver=homeserver, database=current_database
+            )
+        except MatrixReplicationChannel.DoesNotExist:
+            current_db_matrix_channel = current_database.create_channel(
+                MatrixReplicationChannel, homeserver=homeserver, source=True, target=True
+            )
+
         # fetch all of the groups (excluding the current database since it already has a primary target)
         databases = Database.objects.exclude(pk=current_database.pk)
         with transaction.atomic():

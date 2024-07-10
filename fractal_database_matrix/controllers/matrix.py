@@ -1,14 +1,17 @@
 import sys
 from getpass import getpass
 
+from asgiref.sync import async_to_sync
 from clicz import cli_method
+from fractal.cli.controllers.auth import AuthenticatedController, auth_required
 from fractal.cli.controllers.registration import RegistrationController
+from fractal.matrix import MatrixClient
 from fractal_database.utils import use_django
 
 from .replicate import ReplicationController
 
 
-class MatrixController:
+class MatrixController(AuthenticatedController):
     PLUGIN_NAME = "matrix"
 
     @use_django
@@ -69,6 +72,32 @@ class MatrixController:
             print(
                 f"You can replicate your data later with `fractal replicate to {homeserver.url} {registration_token}`"
             )
+
+    @auth_required
+    @use_django
+    @cli_method
+    def make_admin(self, matrix_id: str, **kwargs):
+        """
+        Make a user an admin on the homeserver. Assumes that you are an admin to
+        the homeserver that you are currently logged in as.
+
+        ---
+        Args:
+            matrix_id: The matrix ID of the user to make an admin.
+        """
+        access_token, homeserver_url, _ = self.get_creds()  # type: ignore
+
+        async def _make_admin():
+            async with MatrixClient(homeserver_url, access_token) as client:
+                await client.synapse_admin_make_user_admin(matrix_id)
+
+        try:
+            async_to_sync(_make_admin)()
+        except Exception as err:
+            print(f"Error making user {matrix_id} an admin: {err}", file=sys.stderr)
+            exit(1)
+
+        print(f"Successfully made {matrix_id} an admin on {homeserver_url}")
 
 
 Controller = MatrixController

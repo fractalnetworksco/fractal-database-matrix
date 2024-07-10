@@ -277,7 +277,7 @@ class CreateMatrixSpace(MatrixOperation):
 
         channel: "MatrixReplicationChannel" = (
             await operation.channel_type.model_class()
-            .objects.select_related("database", "homeserver")
+            .objects.select_related("database", "homeserver", "database__parent_db")
             .aget(pk=operation.channel_id)
         )  # type: ignore
 
@@ -296,7 +296,10 @@ class CreateMatrixSpace(MatrixOperation):
             {"type": "f.database.channel", "content": {}},
         ]
 
-        if extra_state is not None:
+        if channel.database.parent_db is None:
+            initial_state.append({"type": "f.database.root", "content": {}})
+
+        if isinstance(extra_state, dict):
             initial_state.append(extra_state)
 
         room_id = await self.create_room(
@@ -379,8 +382,6 @@ class CreateDevicesSubSpace(CreateMatrixSubSpace):
             "name": "Devices",
             "metadata_label": "devices_room_id",
         }
-        if channel.database.parent_db is None:
-            metadata["extra_state"] = {"type": "f.database.root", "content": {}}
 
         # create the operation for the creating the subspace
         create_subspace = [

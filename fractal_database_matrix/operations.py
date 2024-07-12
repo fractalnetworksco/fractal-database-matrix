@@ -143,7 +143,7 @@ class MatrixOperation(Operation):
             logger.info("Accepting invite for %s as %s" % (room_id, device_matrix_id))
             await client.join_room(room_id)
 
-    async def invite_device(self, device_matrix_id: str, room_id: str) -> None:
+    async def invite_user(self, matrix_id: str, room_id: str) -> None:
         from fractal.cli.controllers.auth import AuthenticatedController
 
         # FIXME: Once user has accounts on many homeservers, we need to strip the
@@ -158,8 +158,8 @@ class MatrixOperation(Operation):
             homeserver_url=homeserver_url,
             access_token=access_token,
         ) as client:
-            logger.info("Inviting %s to %s" % (device_matrix_id, room_id))
-            await client.invite(user_id=device_matrix_id, room_id=room_id, admin=True)
+            logger.info("Inviting %s to %s" % (matrix_id, room_id))
+            await client.invite(user_id=matrix_id, room_id=room_id, admin=True)
 
     async def register_device_account(
         self,
@@ -509,7 +509,7 @@ class InviteDeviceToSpace(MatrixOperation):
             raise Exception(f"Failed to find room id in channel metadata for {metadata_label}")
 
         try:
-            await self.invite_device(device_creds.matrix_id, room_id)
+            await self.invite_user(device_creds.matrix_id, room_id)
         except Exception as e:
             # if the device is already in the room, no need to accept the invite
             if "is already in the room" in str(e):
@@ -712,7 +712,7 @@ class InviteDeviceToDeviceSpace(MatrixOperation):
             raise Exception(f"Failed to find device credentials for {membership.device}")
 
         try:
-            await self.invite_device(device_creds.matrix_id, channel.device_space)
+            await self.invite_user(device_creds.matrix_id, channel.device_space)
         except Exception as e:
             # if the device is already in the room, no need to accept the invite
             if "is already in the room" in str(e):

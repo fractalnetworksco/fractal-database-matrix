@@ -15,6 +15,7 @@ from nio import RoomCreateError, RoomPutStateError, RoomVisibility
 if TYPE_CHECKING:
     from fractal_database.models import (
         App,
+        DatabaseMembership,
         Device,
         DeviceMembership,
         DurableOperation,
@@ -130,6 +131,20 @@ class MatrixOperation(Operation):
                 "Successfully added child space %s to parent space %s"
                 % (child_room_id, parent_room_id)
             )
+
+    async def accept_invite_as_user(self, room_id: str, homeserver_url: str):
+        creds = AuthenticatedController.get_creds()
+        if not creds:
+            raise Exception("You must be logged in to accept an invite to a space")
+
+        access_token, homeserver_url, user_matrix_id = creds
+
+        async with MatrixClient(
+            homeserver_url=homeserver_url,
+            access_token=access_token,
+        ) as client:
+            logger.info("Accepting invite for %s as %s" % (room_id, user_matrix_id))
+            await client.join_room(room_id)
 
     async def accept_invite_as_device(
         self, device_creds: "MatrixCredentials", room_id: str, homeserver_url: str
@@ -1079,7 +1094,6 @@ class SetDisplayName(MatrixOperation):
 
 
 class CreateAppSpace(CreateMatrixDatabase):
-
     @classmethod
     def create_durable_operations(
         cls,
@@ -1133,4 +1147,151 @@ class CreateAppSpace(CreateMatrixDatabase):
             "Successfully created App Space representation for %s in Matrix representation on channel %s"
             % (name, channel)
         )
+        return None
+
+
+class AcceptDatabaseMemberInvite(MatrixOperation):
+    async def run(self, operation: "DurableOperation") -> None:
+        """
+        Sends an invite to the database member in the instance (DatabaseMembership) to the
+        space on the associated channel.
+        """
+        try:
+            room_id = operation.metadata["room_id_label"]
+        except KeyError:
+            raise Exception("room_id_label must be specified in metadata")
+
+        model_class = operation.content_type.model_class()  # type: ignore
+        membership: "DatabaseMembership" = await model_class.objects.select_related("user").aget(
+            pk=operation.object_id
+        )  # type: ignore
+
+        # fetch channel in order to get room_id for the group to invite user to
+        channel: "MatrixReplicationChannel" = (
+            await operation.channel_type.model_class()
+            .objects.select_related("homeserver")
+            .aget(pk=operation.channel_id)
+        )  # type: ignore
+
+        user_matrix_id = membership.user.matrix_id
+        if not user_matrix_id:
+            raise Exception(f"Failed to find user {membership.user} matrix id")
+
+        try:
+            room_id = channel.metadata[room_id]
+        except KeyError:
+            raise Exception(f"Failed to find room id in channel metadata for {room_id}")
+
+        try:
+            await self.accept_invite_as_user(room_id, homeserver_url=channel.homeserver.url)
+        except Exception as e:
+            # if the user is already in the room, no need to accept the invite
+            if "is already in the room" in str(e):
+                return None
+            raise e
+
+        return None
+
+
+class InviteDatabaseMemberToSpace(MatrixOperation):
+    @classmethod
+    def create_durable_operations(
+        cls,
+        instance: "DatabaseMembership",
+        channel: "ReplicationChannel",
+    ):
+        """
+        Create the operations (tasks) for creating a Matrix space
+        """
+        from fractal_database.models import DurableOperation
+
+        metadata = instance.operation_metadata_props()
+
+        creds = AuthenticatedController.get_creds()
+        if not creds:
+            logged_in_user_matrix_id = None
+        else:
+            logged_in_user_matrix_id = creds[2]
+
+        operations = [
+            # invite the user to the main space
+            DurableOperation.objects.create(
+                instance=instance,
+                module=cls.operation_module(),
+                channel=channel,
+                metadata={"room_id_label": "room_id"},
+            ),
+            # in order for user to add their devices,
+            # they must be in the devices room.
+            DurableOperation.objects.create(
+                instance=instance,
+                module=cls.operation_module(),
+                channel=channel,
+                metadata={"room_id_label": "devices_room_id"},
+            ),
+        ]
+
+        # if logged in user is the user being invited,
+        # create operations to accept the invites
+        if (
+            logged_in_user_matrix_id is not None
+            and metadata.get("matrix_id") == logged_in_user_matrix_id
+        ):
+            operations.append(
+                DurableOperation.objects.create(
+                    instance=instance,
+                    module=AcceptDatabaseMemberInvite.operation_module(),
+                    channel=channel,
+                    metadata={"room_id_label": "room_id"},
+                )
+            )
+            operations.append(
+                DurableOperation.objects.create(
+                    instance=instance,
+                    module=AcceptDatabaseMemberInvite.operation_module(),
+                    channel=channel,
+                    metadata={"room_id_label": "devices_room_id"},
+                )
+            )
+        return operations
+
+    async def run(self, operation: "DurableOperation") -> None:
+        """
+        Sends an invite to the database member in the instance (DatabaseMembership) to the
+        space on the associated channel.
+        """
+        try:
+            room_id = operation.metadata["room_id_label"]
+        except KeyError:
+            raise Exception("room_id_label must be specified in operation metadata")
+
+        model_class = operation.content_type.model_class()  # type: ignore
+        membership: "DatabaseMembership" = await model_class.objects.select_related("user").aget(
+            pk=operation.object_id
+        )  # type: ignore
+
+        # fetch channel in order to get room_id for the group to invite user to
+        channel: (
+            "MatrixReplicationChannel"
+        ) = await operation.channel_type.model_class().objects.aget(
+            pk=operation.channel_id
+        )  # type: ignore
+
+        user_matrix_id = membership.user.matrix_id
+        if not user_matrix_id:
+            raise Exception(f"Failed to find user {membership.user} matrix id")
+
+        try:
+            room_id = channel.metadata[room_id]
+        except KeyError:
+            raise Exception(f"Failed to find room id in channel metadata for {room_id}")
+
+        try:
+            await self.invite_user(user_matrix_id, room_id)
+        except Exception as e:
+            # if the user is already in the room, no need to accept the invite
+            if "is already in the room" in str(e):
+                return None
+            raise e
+
         return None

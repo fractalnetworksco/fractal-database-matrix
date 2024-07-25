@@ -26,7 +26,8 @@ def create_replication_channel_for_new_matrix_homeserver(
 
     if not created or raw:
         return
-
+    if not instance.replication_enabled:
+        return
     if not transaction.get_connection().in_atomic_block:
         raise Exception("Not in transaction")
 
@@ -83,6 +84,8 @@ def create_matrix_replication_target_for_new_database(
         return
 
     for homeserver in homeservers:
+        if not homeserver.replication_enabled:
+            continue
         instance.create_channel(
             MatrixReplicationChannel,
             homeserver=homeserver,

@@ -49,6 +49,7 @@ class MatrixHomeserver(Service):
     url = models.URLField(unique=True)
     priority = models.PositiveIntegerField(default=0, blank=True, null=True)
     registration_token = models.CharField(max_length=255, blank=True, null=True)
+    replication_enabled = models.BooleanField(default=False)
 
     def __str__(self) -> str:
         return f"{self.url} (MatrixHomeserver)"
@@ -205,7 +206,7 @@ class MatrixCredentials(BaseModel):
     homeserver = models.ForeignKey(
         MatrixHomeserver, on_delete=models.CASCADE, related_name="credentials"
     )
-    device = models.ForeignKey(Device, on_delete=models.CASCADE)
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, blank=True, null=True)
 
 
 class InMemoryMatrixCredentials(MatrixCredentials):

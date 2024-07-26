@@ -49,6 +49,8 @@ class ReplicationController(AuthenticatedController):
 
         try:
             homeserver = MatrixHomeserver.objects.get(url=homeserver_url)
+            if not homeserver.replication_enabled:
+                homeserver.update(replication_enabled=True)
         except MatrixHomeserver.DoesNotExist:
             with transaction.atomic():
                 # create the homeserver
@@ -58,6 +60,7 @@ class ReplicationController(AuthenticatedController):
                     type=MatrixHomeserver.__name__,
                     registration_token=registration_token,
                     parent_db=current_database,
+                    replication_enabled=True,
                 )
                 current_device.add_membership(homeserver)
         else:

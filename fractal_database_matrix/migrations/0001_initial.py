@@ -19,6 +19,7 @@ class Migration(migrations.Migration):
                 ('url', models.URLField(unique=True)),
                 ('priority', models.PositiveIntegerField(blank=True, default=0, null=True)),
                 ('registration_token', models.CharField(blank=True, max_length=255, null=True)),
+                ('replication_enabled', models.BooleanField(default=False)),
             ],
             options={
                 'abstract': False,
@@ -35,7 +36,7 @@ class Migration(migrations.Migration):
                 ('matrix_id', models.CharField(max_length=255)),
                 ('password', models.CharField(blank=True, max_length=255, null=True)),
                 ('access_token', models.CharField(max_length=255)),
-                ('device', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='fractal_database.device')),
+                ('device', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, to='fractal_database.device')),
                 ('homeserver', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='credentials', to='fractal_database_matrix.matrixhomeserver')),
             ],
             options={

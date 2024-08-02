@@ -5,11 +5,11 @@ services:
     build:
       context: ./config
       dockerfile: Dockerfile.synapse
-      args:
-        SYNAPSE_SERVER_NAME: "localhost"
-        SYNAPSE_REPORT_STATS: "no"
     volumes:
       - synapse-db:/data
+    environment:
+      SYNAPSE_SERVER_NAME: "localhost"
+      SYNAPSE_REPORT_STATS: "no"
     # ports:
     #   - 8008:8008
     healthcheck:
@@ -22,8 +22,6 @@ services:
     restart: unless-stopped
   element:
     image: vectorim/element-web:latest
-    ports:
-      - "8009:80"
     restart: unless-stopped
   nginx:
     image: homeserver-nginx:latest

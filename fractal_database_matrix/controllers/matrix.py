@@ -44,18 +44,26 @@ class MatrixController(AuthenticatedController):
 
         homeserver.config.apply()
         # prompt user for credentials for their account
-        matrix_id = input(f"Enter your desired matrix ID (@userid:{homeserver.url}): ")
-        password = getpass(f"Enter your desired password for {matrix_id}: ")
+        while True:
+            try:
+                matrix_id = input(f"Enter your desired matrix ID (@userid:{homeserver.url}): ")
+                password = getpass(f"Enter your desired password for {matrix_id}: ")
 
-        # register their account (and login)
-        # NOTE: Assuming that matrix is being launched locally for now
-        reg_controller = RegistrationController()
-        reg_controller.register(
-            matrix_id=matrix_id,
-            password=password,
-            homeserver_url=homeserver.url,
-            local=True,
-        )
+                # register their account (and login)
+                # NOTE: Assuming that matrix is being launched locally for now
+                reg_controller = RegistrationController()
+                reg_controller.register(
+                    matrix_id=matrix_id,
+                    password=password,
+                    homeserver_url=homeserver.url,
+                    local=True,
+                )
+                break
+            except Exception as err:
+                pass
+            except KeyboardInterrupt:
+                print("Exiting...")
+                exit(1)
 
         # generate a registration token for the homeserver so that their devices can be registered
         registration_token = reg_controller.token("create")

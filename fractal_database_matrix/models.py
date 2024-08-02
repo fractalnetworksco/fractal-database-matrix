@@ -71,6 +71,10 @@ class MatrixHomeserver(Service):
         domain = url.registered_domain or url.domain
         subdomain = url.subdomain
 
+        if "." in subdomain:
+            subdomain, to_add = subdomain.split(".", 1)
+            domain = f"{to_add}.{domain}"
+
         # only attempt to create a link if the current database has the gateways attribute
         try:
             from fractal.gateway.models import Domain, Gateway
@@ -165,10 +169,15 @@ class MatrixHomeserver(Service):
         for service in compose_file["services"]:
             if "expose" in compose_file["services"][service]:
                 expose = compose_file["services"][service]["expose"][0]
-                compose_file["services"][service]["environment"]["SERVER_NAME"] = link.fqdn
+                compose_file["services"][service]["environment"]["MATRIX_SERVER_NAME"] = link.fqdn
+                compose_file["services"][service]["environment"][
+                    "MATRIX_SERVER_FQDN"
+                ] = f"https://{link.fqdn}"
                 break
         else:
             raise Exception("No service with expose key found in compose file")
+
+        compose_file["services"]["synapse"]["environment"]["SYNAPSE_SERVER_NAME"] = link.fqdn
 
         snippet = yaml.safe_load(link.generate_compose_snippet(gateway, expose))
         compose_file["services"].update(snippet)

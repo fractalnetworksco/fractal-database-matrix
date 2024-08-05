@@ -104,9 +104,12 @@ class MatrixHomeserver(Service):
         if "localhost" in url.domain:
             fqdn = cls.SYNAPSE_LOCAL
 
+        if not fqdn.startswith(("http://", "https://")):
+            fqdn = f"https://{fqdn}"
+
         # ensure that the homeserver doesn't already exist
         try:
-            cls.objects.get(url=url)
+            cls.objects.get(url=fqdn)
         except cls.DoesNotExist:
             pass
         else:

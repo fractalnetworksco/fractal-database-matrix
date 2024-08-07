@@ -184,6 +184,12 @@ class MatrixHomeserver(Service):
 
         snippet = yaml.safe_load(link.generate_compose_snippet(gateway, expose))
         compose_file["services"].update(snippet)
+        if "volumes" not in compose_file:
+            compose_file["volumes"] = {}
+
+        # ensure link-data named volume is added into volumes section in compose file
+        # TODO: This should be an S4 volume so that certs are persisted across failover
+        compose_file["volumes"].update({"link-data": None})
         return yaml.dump(compose_file)
 
     def save(self, *args, **kwargs):

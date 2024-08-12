@@ -1213,23 +1213,22 @@ class InviteDatabaseMemberToSpace(MatrixOperation):
         else:
             logged_in_user_matrix_id = creds[2]
 
-        operations = [
-            # invite the user to the main space
-            DurableOperation.objects.create(
-                instance=instance,
-                module=cls.operation_module(),
-                channel=channel,
-                metadata={"room_id_label": "room_id"},
-            ),
-            # in order for user to add their devices,
-            # they must be in the devices room.
-            DurableOperation.objects.create(
-                instance=instance,
-                module=cls.operation_module(),
-                channel=channel,
-                metadata={"room_id_label": "devices_room_id"},
-            ),
-        ]
+        # invite the user to the main space
+        DurableOperation.objects.create(
+            instance=instance,
+            module=cls.operation_module(),
+            channel=channel,
+            metadata={"room_id_label": "room_id"},
+        )
+
+        # in order for user to add their devices,
+        # they must be in the devices room.
+        DurableOperation.objects.create(
+            instance=instance,
+            module=cls.operation_module(),
+            channel=channel,
+            metadata={"room_id_label": "devices_room_id"},
+        )
 
         # if logged in user is the user being invited,
         # create operations to accept the invites
@@ -1237,23 +1236,20 @@ class InviteDatabaseMemberToSpace(MatrixOperation):
             logged_in_user_matrix_id is not None
             and metadata.get("matrix_id") == logged_in_user_matrix_id
         ):
-            operations.append(
-                DurableOperation.objects.create(
-                    instance=instance,
-                    module=AcceptDatabaseMemberInvite.operation_module(),
-                    channel=channel,
-                    metadata={"room_id_label": "room_id"},
-                )
+            DurableOperation.objects.create(
+                instance=instance,
+                module=AcceptDatabaseMemberInvite.operation_module(),
+                channel=channel,
+                metadata={"room_id_label": "room_id"},
             )
-            operations.append(
-                DurableOperation.objects.create(
-                    instance=instance,
-                    module=AcceptDatabaseMemberInvite.operation_module(),
-                    channel=channel,
-                    metadata={"room_id_label": "devices_room_id"},
-                )
+            DurableOperation.objects.create(
+                instance=instance,
+                module=AcceptDatabaseMemberInvite.operation_module(),
+                channel=channel,
+                metadata={"room_id_label": "devices_room_id"},
             )
-        return operations
+        # dont return these operations as they do not need to be added to replication logs
+        return None
 
     async def run(self, operation: "DurableOperation") -> None:
         """

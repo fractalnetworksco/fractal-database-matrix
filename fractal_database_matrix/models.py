@@ -8,10 +8,12 @@ import fractal_database_matrix
 import tldextract
 import yaml
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from django.db import models, transaction
 from fractal_database.models import (
     BaseModel,
     Database,
+    DatabaseConfig,
     Device,
     DurableOperation,
     ReplicatedModel,
@@ -280,7 +282,9 @@ class MatrixReplicationChannel(ReplicationChannel):
         # create an instance of the operation module
         operation = DurableOperation.get_operation(operation_module)
 
-        durable_operations.extend(operation.create_durable_operations(instance, self))
+        ops = operation.create_durable_operations(instance, self)
+        if ops is not None:
+            durable_operations.extend(ops)
 
         if isinstance(instance, ReplicationChannel):
             database_type = self._get_database_type()
@@ -298,6 +302,60 @@ class MatrixReplicationChannel(ReplicationChannel):
                 )
 
         return durable_operations
+
+    async def replicate_async(self) -> None:
+        """
+        Replicates the provided replication event to the homeserver
+        """
+        # manually fetch the "root" database by getting the database
+        # configured as the true current database
+        try:
+            config = await DatabaseConfig.objects.select_related(
+                "current_db", "current_device"
+            ).aget()
+        except DatabaseConfig.DoesNotExist:
+            logger.error("No database config found")
+            return None
+
+        root_database: "Database" = config.current_db
+        current_device: "Device" = config.current_device
+
+        # get origin channel for the root database
+        origin_channel = await root_database.aorigin_channel()
+        if not origin_channel:
+            logger.warning("No origin channel found for root database")
+            return None
+
+        # get current device's room for the origin channel
+        # this is the room that we'll kick the replicate_async task into
+        membership = await root_database.device_memberships.aget(device=current_device)
+        device_room = membership.metadata.get(str(origin_channel.id))
+
+        # if device room isn't found on root database's origin channel, then
+        # synchronously replicate the origin channel so that the room can be created.
+        # once created, we can kick the replicate_async task into the current device's room
+        if not device_room:
+            await origin_channel.replicate()
+            # now that replication has been done, device room should exist,
+            # so recall this method to kick the replicate_async task into the device's room
+            return await self.replicate_async()
+
+        from fractal_database.replication.tasks import replicate_async
+
+        task_labels = {
+            "room_id": device_room,
+        }
+
+        try:
+            # kick replicate task into the device's room
+            await self.kick_task(
+                replicate_async,
+                str(self.id),
+                self._meta.label_lower,
+                task_labels=task_labels,
+            )
+        except SendTaskError as e:
+            raise Exception(e.__cause__)
 
     async def push_replication_log(self, fixture: Dict[str, Any]) -> None:
         """

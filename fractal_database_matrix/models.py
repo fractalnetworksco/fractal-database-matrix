@@ -10,6 +10,7 @@ import yaml
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db import models, transaction
+from fractal.cli.controllers.auth import AuthenticatedController
 from fractal_database.models import (
     BaseModel,
     Database,
@@ -117,11 +118,17 @@ class MatrixHomeserver(Service):
         else:
             raise MatrixHomeserverAlreadyExists(fqdn)
 
+        current_database = Database.current_db()
+
         with transaction.atomic():
             homeserver = cls.objects.create(name=name, url=fqdn, type=cls.__name__, **ckwargs)
 
             # add the specified device as a member to the homeserver database
             device.add_membership(homeserver)
+
+            # add all users in the current database as members to the homeserver database
+            for user in current_database.users:
+                user.add_membership(homeserver)
 
             if gateway:
                 homeserver.gateways.add(gateway)
@@ -390,28 +397,47 @@ class MatrixReplicationChannel(ReplicationChannel):
         except SendTaskError as e:
             raise Exception(e.__cause__)
 
-    async def kick_task(self, task_func, *targs, task_labels: Optional[dict] = None, **tkwargs):
+    async def kick_task(
+        self,
+        task_func,
+        *targs,
+        task_labels: Optional[dict] = None,
+        as_user: bool = False,
+        **tkwargs,
+    ):
         if not task_labels:
             task_labels = {}
 
         # ensure that the homeserver is fetched FIXME
         await sync_to_async(lambda: self.homeserver)()
 
-        try:
-            creds = await self.aget_creds()
-        except Exception as e:
-            raise Exception(f"Cannot push replication log: {e}")
+        # kick task as user
+        if as_user:
+            creds = AuthenticatedController.get_creds()
+            if not creds:
+                raise Exception(
+                    f"Attempted to kick task {task_func} as user but no credentials found for current user"
+                )
+            access_token, _, _ = creds
+
+        # kick task as device
+        else:
+            try:
+                creds = await self.aget_creds()
+                access_token = creds.access_token
+            except Exception as e:
+                raise Exception(f"Cannot push replication log: {e}")
 
         broker = (
             FractalMatrixBroker()
             .with_matrix_config(
                 homeserver_url=self.homeserver.url,
-                access_token=creds.access_token,
+                access_token=access_token,
             )
             .with_result_backend(
                 MatrixResultBackend(
                     homeserver_url=self.homeserver.url,
-                    access_token=creds.access_token,
+                    access_token=access_token,
                     result_ex_time=3600,
                 )
             )

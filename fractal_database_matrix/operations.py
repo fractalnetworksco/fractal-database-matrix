@@ -44,7 +44,7 @@ class MatrixOperation(Operation):
 
         access_token, homeserver_url, _ = creds
 
-        async with MatrixClient(homeserver_url, access_token) as client:
+        async with MatrixClient(homeserver_url, access_token, max_timeouts=15) as client:
             res = await client.room_put_state(
                 room_id,
                 state_type,
@@ -86,7 +86,7 @@ class MatrixOperation(Operation):
             if not any([matrix_id.split("@")[1].islower() for matrix_id in invite]):
                 raise Exception("Matrix IDs must be lowercase")
 
-        async with MatrixClient(homeserver_url, access_token) as client:
+        async with MatrixClient(homeserver_url, access_token, max_timeouts=15) as client:
             res = await client.room_create(
                 name=name,
                 space=space,
@@ -117,7 +117,7 @@ class MatrixOperation(Operation):
 
         access_token, homeserver_url, _ = creds
 
-        async with MatrixClient(homeserver_url, access_token) as client:
+        async with MatrixClient(homeserver_url, access_token, max_timeouts=15) as client:
             res = await client.room_put_state(
                 parent_room_id,
                 "m.space.child",
@@ -132,16 +132,26 @@ class MatrixOperation(Operation):
                 % (child_room_id, parent_room_id)
             )
 
-    async def accept_invite_as_user(self, room_id: str, homeserver_url: str):
-        creds = AuthenticatedController.get_creds()
-        if not creds:
-            raise Exception("You must be logged in to accept an invite to a space")
-
-        access_token, homeserver_url, user_matrix_id = creds
+    async def accept_invite_as_user(
+        self, room_id: str, homeserver_url: str, matrix_creds: Optional[tuple[str, str]] = None
+    ):
+        """
+        Args:
+            room_id (str): The room ID to accept the invite to
+            homeserver_url (str): The homeserver URL
+            matrix_creds (tuple[matrix_id, access_token], optional): The Matrix credentials to use.
+                                                                     Defaults to logged in user's credentials.
+        """
+        if not matrix_creds:
+            creds = AuthenticatedController.get_creds()
+            if not creds:
+                raise Exception("You must be logged in to accept an invite to a space")
+            access_token, homeserver_url, user_matrix_id = creds
+        else:
+            user_matrix_id, access_token = matrix_creds
 
         async with MatrixClient(
-            homeserver_url=homeserver_url,
-            access_token=access_token,
+            homeserver_url=homeserver_url, access_token=access_token, max_timeouts=15
         ) as client:
             logger.info("Accepting invite for %s as %s" % (room_id, user_matrix_id))
             await client.join_room(room_id)
@@ -154,13 +164,12 @@ class MatrixOperation(Operation):
         async with MatrixClient(
             homeserver_url=homeserver_url,
             access_token=device_creds.access_token,
+            max_timeouts=15,
         ) as client:
             logger.info("Accepting invite for %s as %s" % (room_id, device_matrix_id))
             await client.join_room(room_id)
 
     async def invite_user(self, matrix_id: str, room_id: str) -> None:
-        from fractal.cli.controllers.auth import AuthenticatedController
-
         # FIXME: Once user has accounts on many homeservers, we need to strip the
         # host off of the room id and try to find credentials that match that host
         creds = AuthenticatedController.get_creds()
@@ -172,6 +181,7 @@ class MatrixOperation(Operation):
         async with MatrixClient(
             homeserver_url=homeserver_url,
             access_token=access_token,
+            max_timeouts=15,
         ) as client:
             logger.info("Inviting %s to %s" % (matrix_id, room_id))
             await client.invite(user_id=matrix_id, room_id=room_id, admin=True)
@@ -189,6 +199,7 @@ class MatrixOperation(Operation):
         async with MatrixClient(
             homeserver_url=homeserver_url,
             access_token=access_token,
+            max_timeouts=15,
         ) as client:
             registration_token = await client.generate_registration_token()
             await client.whoami()
@@ -218,6 +229,7 @@ class MatrixOperation(Operation):
         async with MatrixClient(
             homeserver_url=homeserver_url,
             access_token=creds.access_token,
+            max_timeouts=15,
         ) as client:
             await client.set_displayname(display_name)
 

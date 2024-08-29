@@ -580,6 +580,10 @@ class AcceptSpaceInvite(MatrixOperation):
         if not device_creds:
             raise Exception(f"Failed to find device credentials for {membership.device}")
 
+        logger.info(
+            "Accepting invite for %s(%s) as %s"
+            % (metadata_label, room_id, device_creds.matrix_id)
+        )
         # accept invite on behalf of device
         await self.accept_invite_as_device(device_creds, room_id, channel.homeserver.url)
         logger.info("Device has successfully joined space %s for channel %s" % (room_id, channel))
@@ -655,6 +659,7 @@ class CreateServicesSubSpace(CreateMatrixSubSpace):
         if parent_room_id == child_room_id:
             raise Exception("Parent and child room IDs cannot be the same")
 
+        logger.info("Adding Services subspace to channel %s" % channel)
         # add the apps space to the channel's space
         await self.add_subspace(channel, parent_room_id, child_room_id)
 
@@ -1156,7 +1161,7 @@ class CreateAppSpace(CreateMatrixDatabase):
         await self.add_subspace(channel, channel.app_space, app_space)
 
         logger.info(
-            "Successfully created App Space representation for %s in Matrix representation on channel %s"
+            "Successfully created App Space for %s in Matrix representation on channel %s"
             % (name, channel)
         )
         return None
@@ -1169,7 +1174,7 @@ class AcceptDatabaseMemberInvite(MatrixOperation):
         space on the associated channel.
         """
         try:
-            room_id = operation.metadata["room_id_label"]
+            room_id_label = operation.metadata["room_id_label"]
         except KeyError:
             raise Exception("room_id_label must be specified in metadata")
 
@@ -1190,10 +1195,14 @@ class AcceptDatabaseMemberInvite(MatrixOperation):
             raise Exception(f"Failed to find user {membership.user} matrix id")
 
         try:
-            room_id = channel.metadata[room_id]
+            room_id = channel.metadata[room_id_label]
         except KeyError:
-            raise Exception(f"Failed to find room id in channel metadata for {room_id}")
+            raise Exception(f"Failed to find room id in channel metadata for {room_id_label}")
 
+        logger.info(
+            "Accepting invite to %s as user %s for channel %s"
+            % (room_id_label, user_matrix_id, channel)
+        )
         try:
             await self.accept_invite_as_user(room_id, homeserver_url=channel.homeserver.url)
         except Exception as e:
@@ -1269,7 +1278,7 @@ class InviteDatabaseMemberToSpace(MatrixOperation):
         space on the associated channel.
         """
         try:
-            room_id = operation.metadata["room_id_label"]
+            room_id_label = operation.metadata["room_id_label"]
         except KeyError:
             raise Exception("room_id_label must be specified in operation metadata")
 
@@ -1290,10 +1299,14 @@ class InviteDatabaseMemberToSpace(MatrixOperation):
             raise Exception(f"Failed to find user {membership.user} matrix id")
 
         try:
-            room_id = channel.metadata[room_id]
+            room_id = channel.metadata[room_id_label]
         except KeyError:
-            raise Exception(f"Failed to find room id in channel metadata for {room_id}")
+            raise Exception(f"Failed to find room id in channel metadata for {room_id_label}")
 
+        logger.info(
+            "Sending an invite to %s invite to %s for channel %s"
+            % (room_id_label, user_matrix_id, channel)
+        )
         try:
             await self.invite_user(user_matrix_id, room_id)
         except Exception as e:

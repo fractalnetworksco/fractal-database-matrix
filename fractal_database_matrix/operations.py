@@ -261,8 +261,17 @@ class CreateMatrixRoom(MatrixOperation):
         if operation.instance.metadata.get(metadata_label):
             return {}
 
-        # FIXME: only invite credentials (devices) that the user owns
-        memberships = channel.database.device_memberships.all()
+        from fractal_database.models import DeviceMembership
+
+        if isinstance(operation.instance, DeviceMembership):
+            # only send the invite to the device itself. Other devices do not need to be a
+            # member of this room
+            memberships = channel.database.device_memberships.select_related("device").filter(
+                pk=operation.instance.pk
+            )
+        else:
+            # FIXME: only invite credentials (devices) that the user owns
+            memberships = channel.database.device_memberships.select_related("device").all()
 
         matrix_ids_to_invite = []
         async for membership in memberships:

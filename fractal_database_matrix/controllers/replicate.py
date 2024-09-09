@@ -1,10 +1,13 @@
 from sys import exit
 from typing import Optional
 
+from asgiref.sync import async_to_sync
 from clicz import cli_method
 from django.db import transaction
 from fractal.cli.controllers.auth import AuthenticatedController
+from fractal.matrix.async_client import get_homeserver_for_matrix_id
 from fractal_database.utils import use_django
+from nio import DiscoveryInfoError
 
 
 class ReplicationController(AuthenticatedController):
@@ -37,6 +40,20 @@ class ReplicationController(AuthenticatedController):
 
             # prompt the user for their login information for the homeserver
             self._login(homeserver_url)
+
+        if not self.check_if_user_is_authenticated():
+            print("You must be logged in to replicate your data.")
+            exit(1)
+
+        # attempt to get discovery info for the homeserver since the user could have provided a TLD
+        client = self.create_matrix_client()
+        res = async_to_sync(client.discovery_info)()
+        if isinstance(res, DiscoveryInfoError):
+            print(
+                f"Tried to get discovery info for {homeserver_url} but failed. Will use the provided URL."
+            )
+        else:
+            homeserver_url = res.homeserver_url
 
         from fractal_database.models import Database, Device, LocalReplicationChannel
         from fractal_database_matrix.models import (

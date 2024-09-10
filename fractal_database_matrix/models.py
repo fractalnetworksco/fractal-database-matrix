@@ -17,6 +17,7 @@ from fractal_database.models import (
     DatabaseConfig,
     Device,
     DurableOperation,
+    LocalReplicationChannel,
     ReplicatedModel,
     ReplicationChannel,
     Service,
@@ -327,22 +328,38 @@ class MatrixReplicationChannel(ReplicationChannel):
         root_database: "Database" = config.current_db
         current_device: "Device" = config.current_device
 
-        # get origin channel for the root database
-        origin_channel = await root_database.aorigin_channel()
-        if not origin_channel:
-            logger.warning("No origin channel found for root database")
-            return None
+        # get a non local replication channel for the root database
+        channels = await root_database.aget_all_replication_channels(
+            exclude=[LocalReplicationChannel]
+        )
 
-        # get current device's room for the origin channel
+        # use the first channel we get back
+        try:
+            channel = channels[0]
+        except IndexError:
+            raise Exception("No non local replication channels found for root database")
+
+        # get current device's room for the channel
         # this is the room that we'll kick the replicate_async task into
         membership = await root_database.device_memberships.aget(device=current_device)
-        device_room = membership.metadata.get(str(origin_channel.id))
+        device_room = membership.metadata.get(str(channel.id))
 
-        # if device room isn't found on root database's origin channel, then
-        # synchronously replicate the origin channel so that the room can be created.
+        # if device room isn't found on root database's channel, then
+        # synchronously replicate the channel so that the room can be created.
         # once created, we can kick the replicate_async task into the current device's room
         if not device_room:
-            await origin_channel.replicate()
+            await channel.replicate()
+
+            # if for some reason the device room still isn't found, raise an exception
+            # so we dont recursively call this method
+            membership = await root_database.device_memberships.aget(device=current_device)
+            device_room = membership.metadata.get(str(channel.id))
+            if not device_room:
+                raise Exception(
+                    "Failed to replicate async. Device room for current device %s not found for root database %s on channel %s"
+                    % (current_device, root_database, channel)
+                )
+
             # now that replication has been done, device room should exist,
             # so recall this method to kick the replicate_async task into the device's room
             return await self.replicate_async()
@@ -465,45 +482,3 @@ class BaseMatrixReplicationChannel(MatrixReplicationChannel):
 
     class Meta:
         abstract = True
-
-
-# class DeviceReplicationTarget(BaseMatrixReplicationTarget):
-#     """ """
-
-#     device = models.ForeignKey(
-#         "fractal_database.Device",
-#         on_delete=models.CASCADE,
-#         related_name="device_replication_targets",
-#     )
-
-#     def repr_metadata_props(self) -> Dict[str, str]:
-#         metadata = super().repr_metadata_props()
-#         metadata["name"] = self.name
-#         return metadata
-
-#     def get_operation_module(self) -> str:
-#         return "fractal_database_matrix.operations.DeviceRoom"
-
-#     def create_durable_operations(self, instance: "ReplicatedModel"):
-#         """
-#         Create the representation logs (tasks) for creating a Matrix space
-#         """
-#         from fractal_database.models import DurableOperation
-
-#         repr_logs = []
-#         # get the representation module specified by the provided instance
-#         logger.info("Fetching operation module for %s" % instance)
-#         repr_module = instance.get_operation_module()
-#         if not repr_module:
-#             # provided instance doesn't specify a representation module
-#             return []
-
-#         # create an instance of the representation module
-#         repr_type = DurableOperation.get_module_instance(repr_module)
-
-#         primary_target = self.database.primary_target()  # type: ignore
-
-#         # call the create_representation_logs method on representation instance
-#         repr_logs.extend(repr_type.create_durable_operations(instance, primary_target))
-
-#         return repr_logs

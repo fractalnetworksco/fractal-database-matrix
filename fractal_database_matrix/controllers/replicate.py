@@ -21,6 +21,7 @@ class ReplicationController(AuthenticatedController):
         registration_token: str,
         confirm: bool = False,
         set_as_origin: bool = False,
+        local_url: Optional[str] = None,
         **kwargs,
     ):
         """
@@ -30,6 +31,7 @@ class ReplicationController(AuthenticatedController):
             registration_token: Registration token for the homeserver. Necessary for registering your devices with this homeserver.
             confirm: Consent to replicating your data to the provided homeserver.
             set_as_origin: Set the homeserver as your current database's origin.
+            local_url: Local URL for the homeserver (prefer using this url for faster replication).
         """
         if not confirm:
             res = input(
@@ -67,7 +69,7 @@ class ReplicationController(AuthenticatedController):
         try:
             homeserver = MatrixHomeserver.objects.get(url=homeserver_url)
             if not homeserver.replication_enabled:
-                homeserver.update(replication_enabled=True)
+                homeserver.update(replication_enabled=True, local_url=local_url)
         except MatrixHomeserver.DoesNotExist:
             with transaction.atomic():
                 # create the homeserver
@@ -78,6 +80,7 @@ class ReplicationController(AuthenticatedController):
                     registration_token=registration_token,
                     parent_db=current_database,
                     replication_enabled=True,
+                    local_url=local_url,
                 )
                 current_device.add_membership(homeserver)
         else:

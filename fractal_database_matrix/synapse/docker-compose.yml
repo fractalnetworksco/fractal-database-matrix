@@ -43,3 +43,8 @@ services:
 
 volumes:
   synapse-db:
+
+networks:
+  default:
+    name: fractal-matrix-network
+    external: true

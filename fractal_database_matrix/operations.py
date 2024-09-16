@@ -44,6 +44,15 @@ class MatrixOperation(Operation):
 
         access_token, homeserver_url, _ = creds
 
+        if homeserver_url != channel.homeserver.url:
+            raise Exception(
+                f"You are logged into the wrong homeserver ({homeserver_url}). You must be logged into the homeserver {channel.homeserver.url}"
+            )
+        else:
+            # credentials will work with the local URL as well
+            # prefer the local URL if it exists
+            homeserver_url = channel.homeserver.local_url or homeserver_url
+
         async with MatrixClient(homeserver_url, access_token, max_timeouts=15) as client:
             res = await client.room_put_state(
                 room_id,
@@ -81,6 +90,13 @@ class MatrixOperation(Operation):
 
         access_token, homeserver_url, _ = creds
 
+        if homeserver_url != channel.homeserver.url:
+            raise Exception("You must be logged into the correct homeserver")
+        else:
+            # credentials will work with the local URL as well
+            # prefer the local URL if it exists
+            homeserver_url = channel.homeserver.local_url or homeserver_url
+
         # verify that matrix IDs passed in invite are all lowercase
         if invite:
             if not any([matrix_id.split("@")[1].islower() for matrix_id in invite]):
@@ -117,6 +133,13 @@ class MatrixOperation(Operation):
 
         access_token, homeserver_url, _ = creds
 
+        if homeserver_url != channel.homeserver.url:
+            raise Exception("You must be logged into the correct homeserver")
+        else:
+            # credentials will work with the local URL as well
+            # prefer the local URL if it exists
+            homeserver_url = channel.homeserver.local_url or homeserver_url
+
         async with MatrixClient(homeserver_url, access_token, max_timeouts=15) as client:
             res = await client.room_put_state(
                 parent_room_id,
@@ -133,7 +156,10 @@ class MatrixOperation(Operation):
             )
 
     async def accept_invite_as_user(
-        self, room_id: str, homeserver_url: str, matrix_creds: Optional[tuple[str, str]] = None
+        self,
+        room_id: str,
+        channel: "MatrixReplicationChannel",
+        matrix_creds: Optional[tuple[str, str]] = None,
     ):
         """
         Args:
@@ -150,6 +176,15 @@ class MatrixOperation(Operation):
         else:
             user_matrix_id, access_token = matrix_creds
 
+        if homeserver_url != channel.homeserver.url:
+            raise Exception(
+                f"You are currently logged into {homeserver_url} not {channel.homeserver.url}"
+            )
+        else:
+            # credentials will work with the local URL as well
+            # prefer the local URL if it exists
+            homeserver_url = channel.homeserver.local_url or homeserver_url
+
         async with MatrixClient(
             homeserver_url=homeserver_url, access_token=access_token, max_timeouts=15
         ) as client:
@@ -157,9 +192,11 @@ class MatrixOperation(Operation):
             await client.join_room(room_id)
 
     async def accept_invite_as_device(
-        self, device_creds: "MatrixCredentials", room_id: str, homeserver_url: str
+        self, device_creds: "MatrixCredentials", room_id: str, channel: "MatrixReplicationChannel"
     ):
         device_matrix_id = device_creds.matrix_id
+        homeserver_url = channel.homeserver.local_url or channel.homeserver.url
+
         # accept invite on behalf of device
         async with MatrixClient(
             homeserver_url=homeserver_url,
@@ -169,7 +206,9 @@ class MatrixOperation(Operation):
             logger.info("Accepting invite for %s as %s" % (room_id, device_matrix_id))
             await client.join_room(room_id)
 
-    async def invite_user(self, matrix_id: str, room_id: str) -> None:
+    async def invite_user(
+        self, matrix_id: str, channel: "MatrixReplicationChannel", room_id: str
+    ) -> None:
         # FIXME: Once user has accounts on many homeservers, we need to strip the
         # host off of the room id and try to find credentials that match that host
         creds = AuthenticatedController.get_creds()
@@ -177,6 +216,15 @@ class MatrixOperation(Operation):
             access_token, homeserver_url, owner_matrix_id = creds
         else:
             raise Exception("You must be logged in to Matrix to invite a device")
+
+        if homeserver_url != channel.homeserver.url:
+            raise Exception(
+                f"You are currently logged into {homeserver_url} not {channel.homeserver.url}"
+            )
+        else:
+            # credentials will work with the local URL as well
+            # prefer the local URL if it exists
+            homeserver_url = channel.homeserver.local_url or homeserver_url
 
         async with MatrixClient(
             homeserver_url=homeserver_url,
@@ -216,7 +264,7 @@ class MatrixOperation(Operation):
 
     async def set_display_name(
         self,
-        homeserver_url: str,
+        channel: "MatrixReplicationChannel",
         creds: "MatrixCredentials",
         display_name: str,
         owner_matrix_id: Optional[str] = None,
@@ -225,6 +273,8 @@ class MatrixOperation(Operation):
             # get local part of owner_matrix_id without the @
             owner_username = owner_matrix_id.split("@")[1].split(":")[0]
             display_name = f"{owner_username}'s {display_name}"
+
+        homeserver_url = channel.homeserver.local_url or channel.homeserver.url
 
         async with MatrixClient(
             homeserver_url=homeserver_url,
@@ -293,7 +343,7 @@ class CreateMatrixRoom(MatrixOperation):
             async for account in membership.device.matrixcredentials_set.filter(
                 homeserver=channel.homeserver
             ):
-                await self.accept_invite_as_device(account, room_id, channel.homeserver.url)
+                await self.accept_invite_as_device(account, room_id, channel)
 
         logger.info("Successfully created Matrix Room for %s" % name)
         return {metadata_label: room_id}
@@ -545,7 +595,7 @@ class InviteDeviceToSpace(MatrixOperation):
             raise Exception(f"Failed to find room id in channel metadata for {metadata_label}")
 
         try:
-            await self.invite_user(device_creds.matrix_id, room_id)
+            await self.invite_user(device_creds.matrix_id, channel, room_id)
         except Exception as e:
             # if the device is already in the room, no need to accept the invite
             if "is already in the room" in str(e):
@@ -594,7 +644,7 @@ class AcceptSpaceInvite(MatrixOperation):
             % (metadata_label, room_id, device_creds.matrix_id)
         )
         # accept invite on behalf of device
-        await self.accept_invite_as_device(device_creds, room_id, channel.homeserver.url)
+        await self.accept_invite_as_device(device_creds, room_id, channel)
         logger.info("Device has successfully joined space %s for channel %s" % (room_id, channel))
 
         return None
@@ -698,9 +748,7 @@ class AcceptDeviceSpaceInvite(MatrixOperation):
             raise Exception(f"Failed to find device credentials for {membership.device}")
 
         # accept invite on behalf of device
-        await self.accept_invite_as_device(
-            device_creds, channel.device_space, channel.homeserver.url
-        )
+        await self.accept_invite_as_device(device_creds, channel.device_space, channel)
         logger.info(
             "Device has successfully joined the devices subspace for channel %s" % channel
         )
@@ -753,7 +801,7 @@ class InviteDeviceToDeviceSpace(MatrixOperation):
             raise Exception(f"Failed to find device credentials for {membership.device}")
 
         try:
-            await self.invite_user(device_creds.matrix_id, channel.device_space)
+            await self.invite_user(device_creds.matrix_id, channel, channel.device_space)
         except Exception as e:
             # if the device is already in the room, no need to accept the invite
             if "is already in the room" in str(e):
@@ -1115,7 +1163,7 @@ class SetDisplayName(MatrixOperation):
             )
 
         await self.set_display_name(
-            channel.homeserver.url, device_creds, display_name, owner_matrix_id=owner_matrix_id
+            channel, device_creds, display_name, owner_matrix_id=owner_matrix_id
         )
 
 
@@ -1213,7 +1261,7 @@ class AcceptDatabaseMemberInvite(MatrixOperation):
             % (room_id_label, user_matrix_id, channel)
         )
         try:
-            await self.accept_invite_as_user(room_id, homeserver_url=channel.homeserver.url)
+            await self.accept_invite_as_user(room_id, channel=channel)
         except Exception as e:
             # if the user is already in the room, no need to accept the invite
             if "is already in the room" in str(e):
@@ -1297,10 +1345,10 @@ class InviteDatabaseMemberToSpace(MatrixOperation):
         )  # type: ignore
 
         # fetch channel in order to get room_id for the group to invite user to
-        channel: (
-            "MatrixReplicationChannel"
-        ) = await operation.channel_type.model_class().objects.aget(
-            pk=operation.channel_id
+        channel: "MatrixReplicationChannel" = (
+            await operation.channel_type.model_class()
+            .objects.select_related("homeserver")
+            .aget(pk=operation.channel_id)
         )  # type: ignore
 
         user_matrix_id = membership.user.matrix_id
@@ -1317,7 +1365,7 @@ class InviteDatabaseMemberToSpace(MatrixOperation):
             % (room_id_label, user_matrix_id, channel)
         )
         try:
-            await self.invite_user(user_matrix_id, room_id)
+            await self.invite_user(user_matrix_id, channel, room_id)
         except Exception as e:
             # if the user is already in the room, no need to accept the invite
             if "is already in the room" in str(e):

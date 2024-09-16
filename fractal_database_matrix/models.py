@@ -10,7 +10,10 @@ import yaml
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db import models, transaction
+from docker.errors import NotFound
+from docker.models.networks import Network
 from fractal.cli.controllers.auth import AuthenticatedController
+from fractal_database.fields import LocalURLField
 from fractal_database.models import (
     BaseModel,
     Database,
@@ -46,6 +49,7 @@ logger = logging.getLogger(__name__)
 class MatrixHomeserver(Service):
     SYNAPSE_COMPOSE_FILE_PATH = f"{fractal_database_matrix.__path__[0]}/synapse"
     SYNAPSE_LOCAL = "http://localhost:8008"
+    LOCAL_MATRIX_NETWORK = "fractal-matrix-network"
 
     credentials: models.QuerySet["MatrixCredentials"]
     gateways: models.QuerySet["Gateway"]
@@ -54,6 +58,7 @@ class MatrixHomeserver(Service):
     priority = models.PositiveIntegerField(default=0, blank=True, null=True)
     registration_token = models.CharField(max_length=255, blank=True, null=True)
     replication_enabled = models.BooleanField(default=False)
+    local_url = LocalURLField()
 
     def __str__(self) -> str:
         return f"{self.url} (MatrixHomeserver)"
@@ -153,9 +158,31 @@ class MatrixHomeserver(Service):
     def _build_images(self) -> None:
         docker_compose("build", _cwd=self.SYNAPSE_COMPOSE_FILE_PATH)
 
+    @classmethod
+    def get_docker_network(cls) -> Network:
+        client = docker.from_env()
+        return client.networks.get(cls.LOCAL_MATRIX_NETWORK)
+
+    @classmethod
+    def create_docker_network(cls) -> None:
+        """
+        Ensures that the external docker network that is specified
+        in the homeserver compose file exists.
+        """
+        client = docker.from_env()
+        try:
+            cls.get_docker_network()
+        except NotFound:
+            logger.info("Creating local matrix network %s" % cls.LOCAL_MATRIX_NETWORK)
+            client.networks.create(cls.LOCAL_MATRIX_NETWORK)
+
     def _render_compose_file(self) -> str:
         """ """
         self._build_images()
+
+        if self.local_url:
+            # ensure that external matrix network is created
+            self.create_docker_network()
 
         # FIXME: handle multiple links
         if not hasattr(self.config, "links") or not hasattr(self, "gateways"):

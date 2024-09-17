@@ -174,6 +174,7 @@ class MatrixOperation(Operation):
                 raise Exception("You must be logged in to accept an invite to a space")
             access_token, homeserver_url, user_matrix_id = creds
         else:
+            homeserver_url = channel.homeserver.url
             user_matrix_id, access_token = matrix_creds
 
         if homeserver_url != channel.homeserver.url:

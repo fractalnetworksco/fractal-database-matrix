@@ -10,7 +10,7 @@ from fractal_database.models import (
     ReplicationChannel,
 )
 from fractal_database.operations import Operation
-from nio import RoomCreateError, RoomPutStateError, RoomVisibility
+from nio import RoomCreateError, RoomLeaveError, RoomPutStateError, RoomVisibility
 
 if TYPE_CHECKING:
     from fractal_database.models import (
@@ -283,6 +283,35 @@ class MatrixOperation(Operation):
             max_timeouts=15,
         ) as client:
             await client.set_displayname(display_name)
+
+    async def user_leave_room(
+        self,
+        channel: "MatrixReplicationChannel",
+        room_id: str,
+        creds: Optional["MatrixCredentials"] = None,
+    ):
+        """
+        FIXME: Can't kick other admins from a room.
+        """
+        if not creds:
+            creds = AuthenticatedController.get_creds()
+            if not creds:
+                raise Exception("You must be logged in to remove a user from a room")
+            access_token, homeserver_url, _ = creds
+        else:
+            access_token = creds.access_token
+
+        # FIXME: Cannot kick other admins from the room
+        homeserver_url = channel.homeserver.local_url or channel.homeserver.url
+
+        async with MatrixClient(
+            homeserver_url=homeserver_url,
+            access_token=access_token,
+            max_timeouts=15,
+        ) as client:
+            res = await client.room_leave(room_id)
+            if isinstance(res, RoomLeaveError):
+                raise Exception(res.message)
 
 
 class CreateMatrixRoom(MatrixOperation):
@@ -1267,6 +1296,111 @@ class AcceptDatabaseMemberInvite(MatrixOperation):
             # if the user is already in the room, no need to accept the invite
             if "is already in the room" in str(e):
                 return None
+            raise e
+
+        return None
+
+
+class RemoveUserFromRoom(MatrixOperation):
+    @classmethod
+    def create_durable_operations(
+        cls,
+        instance: "DatabaseMembership",
+        channel: "ReplicationChannel",
+    ):
+        """
+        Create the optional operations (tasks) for removing a user from a Matrix space
+        """
+        from fractal_database.models import DurableOperation
+
+        # remove the user from the main space
+        DurableOperation.objects.create(
+            instance=instance,
+            module=cls.operation_module(),
+            channel=channel,
+            metadata={"room_id_label": "room_id"},
+        )
+
+        return None
+
+    async def run(self, operation: "DurableOperation") -> None:
+        try:
+            room_id_label = operation.metadata["room_id_label"]
+        except KeyError:
+            raise Exception("room_id_label must be specified in operation metadata")
+
+        model_class = operation.content_type.model_class()  # type: ignore
+        membership: "DatabaseMembership" = await model_class.objects.select_related("user").aget(
+            pk=operation.object_id
+        )  # type: ignore
+
+        # fetch channel in order to get room_id for the group to invite user to
+        channel: "MatrixReplicationChannel" = (
+            await operation.channel_type.model_class()
+            .objects.select_related("homeserver")
+            .aget(pk=operation.channel_id)
+        )  # type: ignore
+
+        user_matrix_id = membership.user.matrix_id
+        if not user_matrix_id:
+            raise Exception(f"Failed to find user {membership.user} matrix id")
+
+        try:
+            room_id = channel.metadata[room_id_label]
+        except KeyError:
+            raise Exception(f"Failed to find room id in channel metadata for {room_id_label}")
+
+        logger.info(
+            "User %s is leaving room %s for channel %s" % (user_matrix_id, room_id_label, channel)
+        )
+        try:
+            await self.user_leave_room(channel, room_id)
+        except Exception as e:
+            raise e
+
+        return None
+
+
+class RemoveDeviceFromRoom(RemoveUserFromRoom):
+    async def run(self, operation: "DurableOperation") -> None:
+        try:
+            room_id_label = operation.metadata["room_id_label"]
+        except KeyError:
+            raise Exception("room_id_label must be specified in operation metadata")
+
+        model_class = operation.content_type.model_class()  # type: ignore
+        membership: "DeviceMembership" = await model_class.objects.select_related("device").aget(
+            pk=operation.object_id
+        )  # type: ignore
+
+        # fetch channel in order to get room_id for the group to invite user to
+        channel: "MatrixReplicationChannel" = (
+            await operation.channel_type.model_class()
+            .objects.select_related("homeserver")
+            .aget(pk=operation.channel_id)
+        )  # type: ignore
+
+        device_creds = membership.device.matrixcredentials_set.filter(
+            homeserver=channel.homeserver
+        ).first()
+        if not device_creds:
+            # FIXME: Determine if logged in user is an admin in the room. If so, they can "kick" the device (only works if device is not admin)
+            raise Exception(
+                f"Cannot remove device {membership.device.name} from room as credentials for {channel.homeserver} cannot be found"
+            )
+
+        try:
+            room_id = channel.metadata[room_id_label]
+        except KeyError:
+            raise Exception(f"Failed to find room id in channel metadata for {room_id_label}")
+
+        logger.info(
+            "Removing device %s from room %s for channel %s"
+            % (membership.device.name, room_id_label, channel)
+        )
+        try:
+            await self.user_leave_room(channel, room_id, creds=device_creds)
+        except Exception as e:
             raise e
 
         return None

@@ -311,6 +311,8 @@ class MatrixOperation(Operation):
         ) as client:
             res = await client.room_leave(room_id)
             if isinstance(res, RoomLeaveError):
+                if "not in room" in res.message:
+                    return None
                 raise Exception(res.message)
 
 
@@ -1313,7 +1315,6 @@ class RemoveUserFromRoom(MatrixOperation):
         """
         from fractal_database.models import DurableOperation
 
-        # remove the user from the main space
         DurableOperation.objects.create(
             instance=instance,
             module=cls.operation_module(),
@@ -1361,6 +1362,36 @@ class RemoveUserFromRoom(MatrixOperation):
         return None
 
 
+class RemoveUserFromDatabase(RemoveUserFromRoom):
+    @classmethod
+    def create_durable_operations(
+        cls,
+        instance: "DatabaseMembership",
+        channel: "ReplicationChannel",
+    ):
+        """
+        Create the optional operations (tasks) for removing a user from a Matrix Database
+        """
+        from fractal_database.models import DurableOperation
+
+        # create operations to remove the user from all of the rooms on the channel
+        for room_id_label in channel.metadata.keys():
+            DurableOperation.objects.create(
+                instance=instance,
+                module=RemoveUserFromRoom.operation_module(),
+                channel=channel,
+                metadata={"room_id_label": room_id_label},
+            )
+
+        return None
+
+    async def run(self, operation: "DurableOperation") -> None:
+        # this operation needs to simply create the operations to remove the user from the rooms
+        # those will individually handle the actual removal
+        # this does not need to do anything else
+        return None
+
+
 class RemoveDeviceFromRoom(RemoveUserFromRoom):
     async def run(self, operation: "DurableOperation") -> None:
         try:
@@ -1369,8 +1400,10 @@ class RemoveDeviceFromRoom(RemoveUserFromRoom):
             raise Exception("room_id_label must be specified in operation metadata")
 
         model_class = operation.content_type.model_class()  # type: ignore
-        membership: "DeviceMembership" = await model_class.objects.select_related("device").aget(
-            pk=operation.object_id
+        membership: "DeviceMembership" = (
+            await model_class.objects.select_related("device")
+            .prefetch_related("device__matrixcredentials_set")
+            .aget(pk=operation.object_id)
         )  # type: ignore
 
         # fetch channel in order to get room_id for the group to invite user to
@@ -1380,9 +1413,9 @@ class RemoveDeviceFromRoom(RemoveUserFromRoom):
             .aget(pk=operation.channel_id)
         )  # type: ignore
 
-        device_creds = membership.device.matrixcredentials_set.filter(
+        device_creds = await membership.device.matrixcredentials_set.filter(
             homeserver=channel.homeserver
-        ).first()
+        ).afirst()
         if not device_creds:
             # FIXME: Determine if logged in user is an admin in the room. If so, they can "kick" the device (only works if device is not admin)
             raise Exception(
@@ -1403,6 +1436,36 @@ class RemoveDeviceFromRoom(RemoveUserFromRoom):
         except Exception as e:
             raise e
 
+        return None
+
+
+class RemoveDeviceFromDatabase(RemoveDeviceFromRoom):
+    @classmethod
+    def create_durable_operations(
+        cls,
+        instance: "DatabaseMembership",
+        channel: "ReplicationChannel",
+    ):
+        """
+        Create the optional operations (tasks) for removing a device from a Matrix Database
+        """
+        from fractal_database.models import DurableOperation
+
+        # create the operations to remove the device from all of the rooms on the channel
+        for room_id_label in channel.metadata.keys():
+            DurableOperation.objects.create(
+                instance=instance,
+                module=RemoveDeviceFromRoom.operation_module(),
+                channel=channel,
+                metadata={"room_id_label": room_id_label},
+            )
+
+        return None
+
+    async def run(self, operation: "DurableOperation") -> None:
+        # this operation needs to simply create the operations to remove the device from the rooms
+        # those operations will individually handle the actual removal
+        # this does not need to do anything else
         return None
 
 

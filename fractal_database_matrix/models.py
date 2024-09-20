@@ -326,7 +326,10 @@ class MatrixReplicationChannel(ReplicationChannel):
             db_origin = database_type.origin_channel()
             # if this channel is not the origin channel for the db,
             # then nest it under the origin channel
-            if db_origin and self != db_origin:
+            use_minimized_representation = getattr(
+                settings, "FRACTAL_DATABASE_MINIMIZED_REPRESENTATION", False
+            )
+            if not use_minimized_representation and db_origin and self != db_origin:
                 # if the current target is not the primary target of the current_db
                 # it should be added to the primary target as a subspace
                 operation = DurableOperation.get_operation(

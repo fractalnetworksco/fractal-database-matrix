@@ -2,6 +2,7 @@ import logging
 from secrets import token_hex
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
+from django.conf import settings
 from fractal.cli.controllers.auth import AuthenticatedController
 from fractal.matrix import MatrixClient
 from fractal_database.models import (
@@ -28,6 +29,10 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+USE_MINIMIZED_REPRESENTATION = getattr(
+    settings, "FRACTAL_DATABASE_MINIMIZED_REPRESENTATION", False
+)
 
 
 class MatrixOperation(Operation):
@@ -514,14 +519,15 @@ class CreateDevicesSubSpace(CreateMatrixSubSpace):
             )
         ]
 
-        # create the operation for adding the subspace to the parent space
-        add_subspace_to_parent = DurableOperation.objects.create(
-            instance=instance,
-            module=cls.operation_module(),
-            channel=channel,
-            metadata=instance.operation_metadata_props(),
-        )
-        create_subspace.append(add_subspace_to_parent)
+        if not USE_MINIMIZED_REPRESENTATION:
+            # create the operation for adding the subspace to the parent space
+            add_subspace_to_parent = DurableOperation.objects.create(
+                instance=instance,
+                module=cls.operation_module(),
+                channel=channel,
+                metadata=instance.operation_metadata_props(),
+            )
+            create_subspace.append(add_subspace_to_parent)
         return create_subspace
 
     async def run(self, operation: DurableOperation) -> None:
@@ -560,14 +566,15 @@ class CreateAppsSubSpace(CreateMatrixSubSpace):
             )
         ]
 
-        # create the operation for adding the subspace to the parent space
-        add_subspace_to_parent = DurableOperation.objects.create(
-            instance=instance,
-            module=cls.operation_module(),
-            channel=channel,
-            metadata=instance.operation_metadata_props(),
-        )
-        create_subspace.append(add_subspace_to_parent)
+        if not USE_MINIMIZED_REPRESENTATION:
+            # create the operation for adding the subspace to the parent space
+            add_subspace_to_parent = DurableOperation.objects.create(
+                instance=instance,
+                module=cls.operation_module(),
+                channel=channel,
+                metadata=instance.operation_metadata_props(),
+            )
+            create_subspace.append(add_subspace_to_parent)
         return create_subspace
 
     async def run(self, operation: DurableOperation) -> None:
@@ -697,15 +704,16 @@ class CreateServicesSubSpace(CreateMatrixSubSpace):
             )
         ]
 
-        # create the operation for adding the subspace to the parent space
-        create_subspace.append(
-            DurableOperation.objects.create(
-                instance=instance,
-                module=cls.operation_module(),
-                channel=channel,
-                metadata=instance.operation_metadata_props(),
+        if not USE_MINIMIZED_REPRESENTATION:
+            # create the operation for adding the subspace to the parent space
+            create_subspace.append(
+                DurableOperation.objects.create(
+                    instance=instance,
+                    module=cls.operation_module(),
+                    channel=channel,
+                    metadata=instance.operation_metadata_props(),
+                )
             )
-        )
 
         device_memberships = channel.database.device_memberships.all()
         for membership in device_memberships:
@@ -875,15 +883,16 @@ class CreateDeviceSubRoom(MatrixOperation):
             )
         )
 
-        # create operation for adding the created room the parent space
-        create_subroom_logs.append(
-            DurableOperation.objects.create(
-                instance=instance,
-                module=cls.operation_module(),
-                channel=channel,
-                metadata=instance.operation_metadata_props(),
+        if not USE_MINIMIZED_REPRESENTATION:
+            # create operation for adding the created room the parent space
+            create_subroom_logs.append(
+                DurableOperation.objects.create(
+                    instance=instance,
+                    module=cls.operation_module(),
+                    channel=channel,
+                    metadata=instance.operation_metadata_props(),
+                )
             )
-        )
         return create_subroom_logs
 
     async def run(self, operation: "DurableOperation") -> None:
@@ -1026,7 +1035,7 @@ class CreateMatrixDatabase(CreateMatrixSpace):
         """
         Create the operations (tasks) for creating a Database in Matrix.
         """
-        from fractal_database.models import App, Service
+        from fractal_database.models import App, Device, Service
 
         # create the operations for creating the the Database Space itself
         database_space = CreateMatrixSpace.create_durable_operations(instance, channel)
@@ -1034,7 +1043,14 @@ class CreateMatrixDatabase(CreateMatrixSpace):
         # create the operations for creating the device and app subspaces
         database_space.extend(CreateDevicesSubSpace.create_durable_operations(instance, channel))
 
-        device_memberships = instance.database.device_memberships.all()
+        if not USE_MINIMIZED_REPRESENTATION:
+            device_memberships = instance.database.device_memberships.all()
+        else:
+            # only create a device room for the current
+            device_memberships = instance.database.device_memberships.filter(
+                device=Device.current_device()
+            )
+
         for device_membership in device_memberships:
             database_space.extend(
                 RegisterDeviceAccount.create_durable_operations(device_membership.device, channel)
@@ -1043,20 +1059,23 @@ class CreateMatrixDatabase(CreateMatrixSpace):
                 CreateDeviceSubRoom.create_durable_operations(device_membership, channel)
             )
 
-        try:
-            App.objects.get(pk=instance.database.pk)
-            database_space.extend(
-                CreateServicesSubSpace.create_durable_operations(instance, channel)
-            )
-        except App.DoesNotExist:
-            database_space.extend(CreateAppsSubSpace.create_durable_operations(instance, channel))
+        if not USE_MINIMIZED_REPRESENTATION:
+            try:
+                App.objects.get(pk=instance.database.pk)
+                database_space.extend(
+                    CreateServicesSubSpace.create_durable_operations(instance, channel)
+                )
+            except App.DoesNotExist:
+                database_space.extend(
+                    CreateAppsSubSpace.create_durable_operations(instance, channel)
+                )
 
-        try:
-            Service.objects.get(pk=instance.database.pk)
-        except Service.DoesNotExist:
-            database_space.extend(
-                CreateServicesSubSpace.create_durable_operations(instance, channel)
-            )
+            try:
+                Service.objects.get(pk=instance.database.pk)
+            except Service.DoesNotExist:
+                database_space.extend(
+                    CreateServicesSubSpace.create_durable_operations(instance, channel)
+                )
 
         return database_space
 
@@ -1078,13 +1097,14 @@ class CreateMatrixSubRoom(CreateMatrixSubSpace):
         create_subroom = CreateMatrixRoom.create_durable_operations(instance, channel)
 
         # create the operations for adding the room to the parent space
-        add_subroom_to_parent = DurableOperation.objects.create(
-            instance=instance,
-            module=cls.operation_module(),
-            channel=channel,
-            metadata=instance.operation_metadata_props(),
-        )
-        create_subroom.append(add_subroom_to_parent)
+        if not USE_MINIMIZED_REPRESENTATION:
+            add_subroom_to_parent = DurableOperation.objects.create(
+                instance=instance,
+                module=cls.operation_module(),
+                channel=channel,
+                metadata=instance.operation_metadata_props(),
+            )
+            create_subroom.append(add_subroom_to_parent)
         return create_subroom
 
 
